@@ -34,6 +34,28 @@ for tool in git tar timeout "${providers[@]}"; do
     command -v "$tool" >/dev/null || die "$tool not found on PATH"
 done
 
+# Codex runs each command through its own program, so the folder it is
+# installed in has to be readable too. When codex sits in a shared folder
+# (~/.local/bin, ~/.cargo/bin, /usr/bin and the like), the folder above holds
+# other programs' files, ~/.cargo/credentials.toml among them, so only the
+# binary's own folder is made readable. Codex's home holds its login
+# (auth.json), so a folder that contains it is never made readable either.
+if [[ ${providers[*]} == *codex* ]]; then
+    codex_bin=$(dirname "$(realpath "$(command -v codex)")")
+    codex_root=$(dirname "$codex_bin")
+    case $codex_root in
+        / | /usr | /usr/local | /opt | "$HOME"/.local | "$HOME"/.cargo) codex_root=$codex_bin ;;
+    esac
+    [[ $HOME != "$codex_root" && $HOME != "$codex_root"/* ]] || codex_root=$codex_bin
+    for home in "${CODEX_HOME:-}" "$HOME/.codex"; do
+        [[ -n $home && -e $home ]] || continue
+        home=$(realpath "$home")
+        [[ $home != "$codex_root" && $home != "$codex_root"/* ]] || codex_root=$codex_bin
+        [[ $home != "$codex_root" && $home != "$codex_root"/* ]] ||
+            die "codex is installed inside its own home ($home), which holds its login; install it somewhere else"
+    done
+fi
+
 sentinel=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 lenses=("$sentinel"/lenses/*.md)
 ts=$(date -u +%Y%m%dT%H%M%SZ)
@@ -64,6 +86,11 @@ mkdir "$work/repo"
 } | sort -zu |
     tar -c -f - -C "$repo" --null --no-recursion --ignore-failed-read -T - |
     tar -x -f - -C "$work/repo"
+# A symlink still points wherever it pointed in the repo, so a reviewer that
+# follows one could read a file outside the snapshot, a key under ~/.ssh for
+# one. Every link is removed, and run.txt names them.
+links=$(cd "$work/repo" && find . -type l -printf '%P -> %l\n')
+find "$work/repo" -type l -delete
 
 # Claude: --safe-mode skips the user's and the repo's hooks, plugins, MCP
 # servers and CLAUDE.md, and --setting-sources "" loads no settings file, so
@@ -104,7 +131,14 @@ fi
     echo "providers: ${providers[*]}"
     [[ ${providers[*]} != *claude* ]] || echo "claude: model $MODEL, effort $EFFORT, auth: $claude_auth"
     [[ ${providers[*]} != *codex* ]] || echo "codex: model ${CODEX_MODEL:-default}, effort $CODEX_EFFORT, web search off, reads limited to the snapshot, auth: $codex_auth"
+    [[ ${providers[*]} != *codex* ]] || echo "codex readable install folder: $codex_root"
     echo "lenses: $(basename -s .md -a "${lenses[@]}" | tr '\n' ' ')"
+    if [[ -n $links ]]; then
+        echo "symlinks left out of the snapshot:"
+        printf '%s\n' "$links" | sed 's/^/  /'
+    else
+        echo "symlinks left out of the snapshot: none"
+    fi
 } > "$out/run.txt"
 cat "$out/run.txt"
 echo
@@ -150,18 +184,7 @@ run_codex() { # lens prompt
     # inherit="core" passes the commands PATH, HOME and the like, never
     # CODEX_API_KEY or any other key. web_search="disabled" removes the hosted
     # search tool, which runs on OpenAI's side where the profile can't reach.
-    # Codex runs each command through its own program, so the folder it is
-    # installed in has to be readable too. When codex sits in a shared folder
-    # (~/.local/bin, ~/.cargo/bin, /usr/bin and the like), the folder above
-    # holds other programs' files, ~/.cargo/credentials.toml among them, so
-    # only the binary's own folder is made readable.
-    local codex_bin codex_root
-    codex_bin=$(dirname "$(realpath "$(command -v codex)")")
-    codex_root=$(dirname "$codex_bin")
-    case $codex_root in
-        / | /usr | /usr/local | /opt | "$HOME"/.local | "$HOME"/.cargo) codex_root=$codex_bin ;;
-    esac
-    [[ $HOME != "$codex_root" && $HOME != "$codex_root"/* ]] || codex_root=$codex_bin
+    # codex_root is the install folder chosen above.
     local args=(exec --cd "$work/repo" --skip-git-repo-check --ephemeral
                 -c 'default_permissions="audit"'
                 -c "permissions.audit.filesystem={\":minimal\"=\"read\", \":workspace_roots\"=\"read\", \"$codex_root\"=\"read\"}"
