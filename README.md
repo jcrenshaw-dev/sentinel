@@ -27,7 +27,7 @@ Each project runs the sentinel version its `.sentinel` submodule is pinned to. U
 What `/snt:audit` runs, in order:
 
 1. **Mechanical checks.** `.sentinel/mechanical/check.sh .`, with its output saved to `audit/check.txt`.
-2. **Claude Security scan.** `/claude-security`, a codebase scan of the whole repo. Its report is copied to `audit/claude-security.md`. Its suggest-patches job is never run.
+2. **Claude Security scan.** `/claude-security`, a release, branch or quick scan, picked when the step starts. Its report is copied to `audit/claude-security.md`. Its suggest-patches job is never run.
 3. **Findings log.** One row per step in `audit/findings-log.md`.
 
 Everything the audit writes goes under `audit/`, apart from Claude Security's own `CLAUDE-SECURITY-<timestamp>/` folder. `/snt:onboard` puts both in `.gitignore`, because they hold unfixed vulnerability findings.

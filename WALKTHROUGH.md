@@ -63,7 +63,7 @@ It stops after each step.
 | Step | What it does | What you look at |
 |------|--------------|------------------|
 | 1. Mechanical checks | `check.sh`: cargo audit, cargo deny, clippy and semgrep as gates; geiger, vet, fuzz build, Miri, npm audit, pip-audit and bandit as reports. Its output is saved to `audit/check.txt`. | Failures by tool. Nothing gets fixed in this session. |
-| 2. Claude Security scan | `/claude-security`, a codebase scan of the whole repo; its report is copied to `audit/claude-security.md` | The findings by severity, and whether the scan looked at every trust boundary `THREAT-MODEL.md` names. Rerun it with `--scope` on any it missed. |
+| 2. Claude Security scan | `/claude-security`, a release, branch or quick scan, picked when the step starts; its report is copied to `audit/claude-security.md` | The findings by severity, and whether the scan looked at every trust boundary `THREAT-MODEL.md` names. Rerun it with `--scope` on any it missed. |
 | 3. Findings log | One row per step in `audit/findings-log.md`: the tools that failed, and Claude Security's findings by severity | The notes column is yours to fill in. |
 
 Where everything lands:
