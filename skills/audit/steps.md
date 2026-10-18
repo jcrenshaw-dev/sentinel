@@ -2,7 +2,7 @@
 
 Run the security audit on this repository. Work through the steps below in order. After each step, stop, show the user the result, and wait for them to say continue.
 
-This session only finds and records. Do not fix code, do not write tests, and do not commit anything. What happens to the findings afterwards is the user's decision.
+This session only finds and records. Do not fix code, do not write tests, and do not commit anything. Nothing in this audit runs the project's code: the scans, the lenses and the check only read it. What happens to the findings afterwards is the user's decision.
 
 ## Before you start
 
@@ -28,12 +28,52 @@ Run the `claude-security` skill with the choice spelled out, so it skips its own
 
 When it finishes, find the newest `CLAUDE-SECURITY-<timestamp>/` directory, copy its `CLAUDE-SECURITY-RESULTS.md` to `audit/claude-security.md`, and show the user the findings by severity.
 
+After a whole-repository scan, read the report's Coverage section for production files it did not cover: files it says were not assigned to any component, were read only as background, or should not be counted as covered. List every one, and mark any that is test-only code. If there are any, start your report for this step with this line, filled in:
+
+`ALERT: Claude Security did not cover <N> production files: <paths>. This audit is not complete until they are scanned.`
+
+Then offer a scoped scan of exactly those files at the same effort. If the user runs it, copy its report to `audit/claude-security-skipped.md` and log it as its own row, `claude-security (skipped files)`.
+
 Do not run or offer its suggest-patches job. Patches are fixes, and this audit fixes nothing.
 
-## 3. Findings log
+## 3. Lens pass
 
-Write one row per step into `audit/findings-log.md`: the date, the repo, the step (for Claude Security, with the scan in brackets, for example `claude-security (branch)`), and what it found (for check.sh, the tools that failed; for Claude Security, the count of findings by severity). Leave the notes column empty for the user. If the file does not exist, start it from `.sentinel/findings-log.md`. Never write into `.sentinel/`: it is the kit's public repository, and the log can count findings that are not fixed yet.
+The lenses are eight review prompts in `.sentinel/lenses/`, one concern each, that read the whole repository against `THREAT-MODEL.md`. They find things the Claude Security scan misses, and a second model finds things the first one misses. They cost real money or plan usage, so nothing runs until the user chooses.
+
+Ask the user in one AskUserQuestion whether to run them, and on which model. First check whether `CODEX_API_KEY` or `OPENAI_API_KEY` is set, without printing either, so the question can name the account Codex would bill. Offer exactly these four, with the recommended one first and marked " (Recommended)": Both after a release scan, Claude after a quick scan, Skip after a branch scan (the lenses read the whole repository, not the diff).
+
+- **Claude:** one run of each lens on the logged-in Claude plan. On Terminus (622 tracked files) this took about 35 minutes and came to about $31 at API prices.
+- **Codex:** one run of each lens on Codex, billed to the API key, or to the Codex login when no key is set. On Terminus this took about 17 minutes and cost about $35.
+- **Both:** the two together.
+- **Skip:** run nothing.
+
+Say in the question that the costs come from Terminus and grow with the size of the repository.
+
+If the answer includes Codex and `codex` is not on PATH, say so and stop this step. Otherwise run `.sentinel/lenses.sh . <claude|codex|both>` and wait for it. It prints where the results went, `audit/lenses/<timestamp>/`. If a run fails, show the end of its `.log` and ask before running it again. Never rerun on your own: a failed run can be a spent quota.
+
+On Skip, go straight to step 5 and log `lenses (skipped)`.
+
+## 4. Check the lens findings
+
+Lens output is unverified, and its severities run high. Check it before the user sees it. This step reads only: never build, run or test the code, and never write an exploit or a proof of concept.
+
+1. Read every `## Finding` block under `audit/lenses/<timestamp>/`, then `THREAT-MODEL.md`, `audit/claude-security.md` and, if it exists, `audit/claude-security-skipped.md`.
+2. Group findings that describe the same problem, keeping track of which provider and lens reported each. Set aside, with a one-line reason each:
+   - those the Claude Security report already has (name its finding),
+   - those `THREAT-MODEL.md` already documents (quote the line),
+   - those that need something `THREAT-MODEL.md` says is not an escalation, such as a same-user process that can already write the files.
+3. Send the rest to read-only subagents, grouped by area, a handful of findings each. Each one reads `THREAT-MODEL.md` first, traces its findings in the code at file:line without trusting the lens's line numbers or claims, and returns for each: CONFIRMED (the whole path traced, every step at file:line), PARTLY (what holds and what doesn't), or NOT CONFIRMED (why); whether `THREAT-MODEL.md` documents it; the severity under the threat model's own rules; and the preconditions. Tell them to read only and to write no files.
+4. Write `audit/lenses.md`:
+   - the confirmed and partly confirmed findings by severity, each with its path, the provider and lens that found it, and its preconditions;
+   - the set-aside list with reasons;
+   - any line of `THREAT-MODEL.md` the check found to be wrong.
+
+Show the user the confirmed findings by severity.
+
+## 5. Findings log
+
+Write one row per step into `audit/findings-log.md`: the date, the repo, the step (for Claude Security, with the scan in brackets, for example `claude-security (branch)`; for the lenses, with the choice in brackets, for example `lenses (both)` or `lenses (skipped)`), and what it found (for check.sh, the tools that failed; for Claude Security and the lenses, the count of findings by severity, for the lenses after the check). Leave the notes column empty for the user. If the file does not exist, start it from `.sentinel/findings-log.md`. Never write into `.sentinel/`: it is the kit's public repository, and the log can count findings that are not fixed yet.
 
 ## Finish
 
-Tell the user where everything is: `audit/check.txt`, `audit/claude-security.md`, the `CLAUDE-SECURITY-<timestamp>/` directory and `audit/findings-log.md`. Remind them that nothing was fixed or committed.
+Tell the user where everything is: `audit/check.txt`, `audit/claude-security.md`, `audit/claude-security-skipped.md` if the skipped-files scan ran, the `CLAUDE-SECURITY-<timestamp>/` directory, `audit/lenses.md` and `audit/lenses/<timestamp>/` if the lenses ran, and `audit/findings-log.md`. Remind them that nothing was fixed or committed.

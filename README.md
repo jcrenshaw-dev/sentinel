@@ -27,8 +27,10 @@ Each project runs the sentinel version its `.sentinel` submodule is pinned to. U
 What `/snt:audit` runs, in order:
 
 1. **Mechanical checks.** `.sentinel/mechanical/check.sh .`, with its output saved to `audit/check.txt`.
-2. **Claude Security scan.** `/claude-security`, a release, branch or quick scan, picked when the step starts. Its report is copied to `audit/claude-security.md`. Its suggest-patches job is never run.
-3. **Findings log.** One row per step in `audit/findings-log.md`.
+2. **Claude Security scan.** `/claude-security`, a release, branch or quick scan, picked when the step starts. Its report is copied to `audit/claude-security.md`. After a whole-repository scan, any production file the scan did not cover is flagged with an ALERT, and a scoped scan of those files is offered. Its suggest-patches job is never run.
+3. **Lens pass.** Eight review prompts, one concern each, run once each on Claude, on Codex, on both, or skipped. You choose each time, and the question states the cost. `.sentinel/lenses.sh` runs them.
+4. **Check.** Read-only subagents trace every lens finding the Claude Security report and `THREAT-MODEL.md` don't already cover, and only the confirmed ones reach `audit/lenses.md`.
+5. **Findings log.** One row per step in `audit/findings-log.md`.
 
 Everything the audit writes goes under `audit/`, apart from Claude Security's own `CLAUDE-SECURITY-<timestamp>/` folder. `/snt:onboard` puts both in `.gitignore`, because they hold unfixed vulnerability findings.
 
@@ -38,7 +40,9 @@ Everything the audit writes goes under `audit/`, apart from Claude Security's ow
 |------|------------|
 | `.claude-plugin/`, `skills/` | The `snt` plugin: the `onboard` and `audit` skills, and the marketplace entry that installs them. |
 | `threat-model.template.md` | The template for a project's `THREAT-MODEL.md`. The pull request review reads it first, and `/snt:onboard` copies its key points into the security-guidance rules. |
-| `finding-format.md` | The format the pull request review writes its findings in. |
+| `lenses/*.md` | Eight review prompts, one concern each: data exposure, path handling, untrusted input, permissions, resource limits, hook execution, supply chain, crypto and state. |
+| `lenses.sh` | Runs every lens once through `claude -p`, `codex exec` or both. |
+| `finding-format.md` | The format the pull request review and the lenses write their findings in. |
 | `skills/<name>/steps.md` | The steps of `/snt:audit` and `/snt:onboard`. The plugin's skills are short stubs that read these from the project's `.sentinel`, so the steps always match the pinned kit. |
 | `mechanical/check.sh` | Runs cargo audit, cargo deny, clippy, semgrep and the rest, depending on what the repo contains. |
 | `mechanical/install.sh` | Installs those tools on Arch Linux. |
@@ -55,6 +59,7 @@ Everything the audit writes goes under `audit/`, apart from Claude Security's ow
 - `bash`, `git`, `python3`.
 - Claude Code, with the `claude-security` and `security-guidance` plugins from `claude-plugins-official`.
 - The mechanical tools: `mechanical/install.sh` on Arch, `ci/install-tools.sh` on CI runners.
+- For a lens pass on Codex: the Codex CLI (`codex`) on PATH, and an OpenAI API key or a Codex login.
 
 ## check.sh
 
@@ -75,6 +80,33 @@ Gates fail the run when they fail or when the tool is not installed. Everything 
 | `bandit -r .` | `pyproject.toml` or `requirements.txt` exists | report |
 
 semgrep runs with `--metrics=off`. `semgrep.yml` also lists rules to skip: the three p/rust rules that flag reading the program's arguments or its own path (`args`, `args-os`, `current-exe`), which fire on every command-line tool.
+
+## lenses.sh
+
+```
+lenses.sh <repo-dir> <claude|codex|both>
+```
+
+Each lens runs once on each provider you name. Claude runs three lenses at a time and Codex four, and with `both` Claude finishes before Codex starts. Results go to `<repo>/audit/lenses/<timestamp>/<provider>/<lens>.md`, each with a `.log`, plus `run.txt` recording the commit, models and settings. A run that fails leaves only its `.log`.
+
+Settings, set as environment variables:
+
+| Variable | Default | What it sets |
+|----------|---------|--------------|
+| `SENTINEL_MODEL` | `opus` | Claude model (`--model`) |
+| `SENTINEL_EFFORT` | `xhigh` | Claude effort (`--effort`) |
+| `SENTINEL_CODEX_MODEL` | `gpt-6-astra` | Codex model (`-m`); set it to an empty string for Codex's own default |
+| `SENTINEL_CODEX_EFFORT` | `xhigh` | Codex `model_reasoning_effort` |
+| `SENTINEL_RUN_TIMEOUT` | `3600` | Seconds before a single run is killed |
+
+Billing: Claude runs in `--safe-mode` on your logged-in claude.ai plan. To bill an API key instead, set `SENTINEL_ANTHROPIC_API_KEY`, or `ANTHROPIC_API_KEY`. Don't export `ANTHROPIC_API_KEY` on a workstation: every interactive Claude Code session would see it alongside your claude.ai login. Codex uses `CODEX_API_KEY`, or `OPENAI_API_KEY` passed to it as `CODEX_API_KEY`, and falls back to your Codex login when neither is set. On Terminus (622 tracked files), one pass cost about $31 at API prices on Claude and about $35 on Codex. The token counts Codex prints in its logs undercount what OpenAI bills, so read the cost from OpenAI's usage page.
+
+What the reviewers can and cannot do:
+
+- They read a snapshot of the repo's tracked and untracked-but-not-ignored files in a private temp directory, so no run sees another run's output and nothing they do touches your working tree. `audit/`, `CLAUDE-SECURITY-*/` and the sentinel directory are left out of the snapshot, so the lenses never see the Claude Security report.
+- Claude gets only the Read, Grep and Glob tools, with nothing pre-approved, so any read or search outside the snapshot (your home directory, `/proc`) is refused. (`--bare` would drop Grep and Glob on Linux, which is why the runs use `--safe-mode`.) No settings file is loaded, neither the repo's `.claude/settings.json` nor your own, so an allow rule in your settings can't widen what a reviewer reads. The repo's hooks and MCP servers are not loaded, and neither are your own hooks, plugins, MCP servers or CLAUDE.md. Sessions are not saved.
+- Each CLI gets only its own API key.
+- Codex runs under a permission profile that makes only the snapshot, the system folders its commands need and its own install folder readable, with no writes and no network. Its hosted web search is turned off, because that runs on OpenAI's side, where the profile can't reach. The commands it runs get only basic variables such as `PATH` and `HOME`, never `CODEX_API_KEY`. Codex's own `--sandbox read-only` is not used: it lets commands read the whole disk, home directory included, and silently overrides the profile. Without an API key, Codex loads your global `AGENTS.md`.
 
 ## CI
 

@@ -24,7 +24,7 @@ claude plugin install security-guidance@claude-plugins-official
 
 **Keys.** The audit runs on your claude.ai login, so it needs no key on your machine. Keep the Anthropic API key in your password manager. Its only job is the GitHub secret for the pull request review (onboarding step 6). It must be scoped to a workspace: an unscoped key fails with a 400 asking for an `anthropic-workspace-id` header. Never export `ANTHROPIC_API_KEY` in your shell: every interactive Claude Code session would see it next to your claude.ai login.
 
-**CLIs.** `claude` on PATH.
+**CLIs.** `claude` on PATH. For a lens pass on Codex, `codex` on PATH too, with `OPENAI_API_KEY` set or a Codex login.
 
 ## 2. Onboard a project (once per repo)
 
@@ -63,8 +63,10 @@ It stops after each step.
 | Step | What it does | What you look at |
 |------|--------------|------------------|
 | 1. Mechanical checks | `check.sh`: cargo audit, cargo deny, clippy and semgrep as gates; geiger, vet, fuzz build, Miri, npm audit, pip-audit and bandit as reports. Its output is saved to `audit/check.txt`. | Failures by tool. Nothing gets fixed in this session. |
-| 2. Claude Security scan | `/claude-security`, a release, branch or quick scan, picked when the step starts; its report is copied to `audit/claude-security.md` | The findings by severity, and whether the scan looked at every trust boundary `THREAT-MODEL.md` names. Rerun it with `--scope` on any it missed. |
-| 3. Findings log | One row per step in `audit/findings-log.md`: the tools that failed, and Claude Security's findings by severity | The notes column is yours to fill in. |
+| 2. Claude Security scan | `/claude-security`, a release, branch or quick scan, picked when the step starts; its report is copied to `audit/claude-security.md` | The findings by severity, any ALERT line about production files the scan did not cover, and, after a release scan, whether it looked at every trust boundary `THREAT-MODEL.md` names. Rerun it with `--scope` on any it missed. |
+| 3. Lens pass | Asks Claude, Codex, both or skip, with the cost, then runs `.sentinel/lenses.sh` | Your choice. Nothing runs until you make it. |
+| 4. Check | Read-only subagents trace each lens finding that is new, and write the confirmed ones to `audit/lenses.md` | The confirmed findings by severity, and the list of what was set aside and why. |
+| 5. Findings log | One row per step in `audit/findings-log.md`: the tools that failed, and the findings by severity for Claude Security and the lenses | The notes column is yours to fill in. |
 
 Where everything lands:
 
@@ -72,7 +74,10 @@ Where everything lands:
 |------|---------------|
 | `audit/check.txt` | The mechanical checks' output |
 | `audit/claude-security.md` | The Claude Security report |
+| `audit/claude-security-skipped.md` | The scoped scan of files the main scan did not cover, if it ran |
 | `CLAUDE-SECURITY-<timestamp>/` | Claude Security's own run folder |
+| `audit/lenses/<timestamp>/` | Each lens's raw output and log, per provider |
+| `audit/lenses.md` | The checked lens findings |
 | `audit/findings-log.md` | The running log for this repo |
 
 `audit/` and `CLAUDE-SECURITY-*/` stay out of git. The audit fixes nothing, writes no tests and commits nothing. What you do with the findings is up to you.
