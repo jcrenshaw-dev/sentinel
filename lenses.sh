@@ -38,21 +38,24 @@ done
 # installed in has to be readable too. When codex sits in a shared folder
 # (~/.local/bin, ~/.cargo/bin, /usr/bin and the like), the folder above holds
 # other programs' files, ~/.cargo/credentials.toml among them, so only the
-# binary's own folder is made readable. Codex's home holds its login
-# (auth.json), so a folder that contains it is never made readable either.
+# binary's own folder is made readable. A folder that holds the home folder,
+# or Codex's home with its login (auth.json), is never made readable either.
+# Every path is compared after symlinks are resolved, so a symlinked home
+# can't slip past.
+holds() { [[ $2 == "$1" || $2 == "$1"/* ]]; }   # holds <folder> <path>
 if [[ ${providers[*]} == *codex* ]]; then
+    home_real=$(realpath "$HOME")
     codex_bin=$(dirname "$(realpath "$(command -v codex)")")
     codex_root=$(dirname "$codex_bin")
     case $codex_root in
-        / | /usr | /usr/local | /opt | "$HOME"/.local | "$HOME"/.cargo) codex_root=$codex_bin ;;
+        / | /usr | /usr/local | /opt | "$home_real"/.local | "$home_real"/.cargo) codex_root=$codex_bin ;;
     esac
-    [[ $HOME != "$codex_root" && $HOME != "$codex_root"/* ]] || codex_root=$codex_bin
-    for home in "${CODEX_HOME:-}" "$HOME/.codex"; do
-        [[ -n $home && -e $home ]] || continue
-        home=$(realpath "$home")
-        [[ $home != "$codex_root" && $home != "$codex_root"/* ]] || codex_root=$codex_bin
-        [[ $home != "$codex_root" && $home != "$codex_root"/* ]] ||
-            die "codex is installed inside its own home ($home), which holds its login; install it somewhere else"
+    for guarded in "$home_real" "${CODEX_HOME:-}" "$HOME/.codex"; do
+        [[ -n $guarded && -e $guarded ]] || continue
+        guarded=$(realpath "$guarded")
+        ! holds "$codex_root" "$guarded" || codex_root=$codex_bin
+        ! holds "$codex_root" "$guarded" ||
+            die "codex is installed in a folder that holds $guarded, your home folder or Codex's home with its login; install it somewhere else"
     done
 fi
 
@@ -88,8 +91,10 @@ mkdir "$work/repo"
     tar -x -f - -C "$work/repo"
 # A symlink still points wherever it pointed in the repo, so a reviewer that
 # follows one could read a file outside the snapshot, a key under ~/.ssh for
-# one. Every link is removed, and run.txt names them.
-links=$(cd "$work/repo" && find . -type l -printf '%P -> %l\n')
+# one. Every link is removed, and run.txt names them, with control characters
+# stripped from the names so a crafted one can't drive the terminal.
+links=$(cd "$work/repo" && find . -type l -printf '%P -> %l\0' |
+    LC_ALL=C tr -d '\001-\037\177' | tr '\0' '\n')
 find "$work/repo" -type l -delete
 
 # Claude: --safe-mode skips the user's and the repo's hooks, plugins, MCP
