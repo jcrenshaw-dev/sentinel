@@ -64,10 +64,12 @@ if [[ -f Cargo.toml ]]; then
     step gate "cargo clippy" "$(cargo_sub clippy)" \
         cargo clippy --all-targets -- -W clippy::pedantic -W clippy::nursery
 
-    # Manifest paths of every workspace member (or the one package).
+    # Manifest paths of every workspace member (or the one package). Python
+    # runs isolated (-I) so a json.py in the repo can't stand in for the
+    # standard library's.
     members() {
         cargo metadata --no-deps --format-version 1 |
-            python3 -c 'import json,sys; print("\n".join(p["manifest_path"] for p in json.load(sys.stdin)["packages"]))'
+            python3 -I -c 'import json,sys; print("\n".join(p["manifest_path"] for p in json.load(sys.stdin)["packages"]))'
     }
 
     # cargo geiger cannot run on a virtual workspace manifest, so run it on
@@ -183,8 +185,9 @@ gitleaks_history() {
         --report-format json --report-path "$report" . || rc=$?
     # A finding's matched text can hold more than the one secret it redacts,
     # so print only each fingerprint (commit:file:rule:line), which is also
-    # the form .gitleaksignore takes.
-    [[ ! -s $report ]] || python3 -c 'import json,sys; sys.stdout.write("".join("leak: " + f["Fingerprint"] + "\n" for f in json.load(open(sys.argv[1]))))' "$report"
+    # the form .gitleaksignore takes. Python runs isolated (-I) for the same
+    # reason as in members().
+    [[ ! -s $report ]] || python3 -I -c 'import json,sys; sys.stdout.write("".join("leak: " + f["Fingerprint"] + "\n" for f in json.load(open(sys.argv[1]))))' "$report"
     rm -f "$report"
     return "$rc"
 }
