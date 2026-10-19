@@ -2,7 +2,7 @@
 
 Run the security audit on this repository. Work through the steps below in order. After each step, stop, show the user the result, and wait for them to say continue.
 
-This session only finds and records. Do not fix code, do not write tests, and do not commit anything. Nothing in this audit runs the project's code: the scans, the lenses and the check only read it. What happens to the findings afterwards is the user's decision.
+This session only finds and records. Do not fix code, do not write tests, and do not commit anything. Step 1 runs the project's code: clippy, cargo geiger and the fuzz build compile it, which runs its build scripts and proc macros and those of its dependencies, the fuzz run runs its fuzz targets, and Miri runs its unit tests. The Claude Security scan, the lenses and the check of their findings only read it. What happens to the findings afterwards is the user's decision.
 
 ## Before you start
 
@@ -14,7 +14,7 @@ Check these and stop with a clear message if any is missing:
 
 ## 1. Mechanical checks
 
-Create `audit/` if it does not exist. Run `.sentinel/mechanical/check.sh .` with its output saved to `audit/check.txt`, and summarize the failures by tool. Do not fix anything.
+Create `audit/` if it does not exist. Run `SENTINEL_FUZZ_SECONDS=${SENTINEL_FUZZ_SECONDS:-60} .sentinel/mechanical/check.sh .` with its output saved to `audit/check.txt`, and summarize the failures by tool. It runs each fuzz target for that many seconds, so it can outlast a tool call's timeout: run it in the background and wait for it to finish. List any fuzz artifact paths it printed, but never open or print an artifact: it is untrusted input. Do not fix anything.
 
 ## 2. Claude Security scan
 

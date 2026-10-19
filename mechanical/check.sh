@@ -2,12 +2,14 @@
 # Run the mechanical security checks that apply to a repo.
 #
 # Usage: check.sh [repo-dir=.]
+#   SENTINEL_FUZZ_SECONDS=<n> also runs each fuzz target for n seconds.
 #
 # Gates (a failure, or the tool missing, makes the exit code non-zero):
 #   cargo audit, cargo deny, cargo clippy, semgrep
 # Reported only (output shown, exit code ignored):
-#   cargo geiger, cargo vet, cargo fuzz build, cargo miri test (only when the
-#   repo has unsafe code and nightly has Miri), npm audit, pip-audit, bandit
+#   cargo geiger, cargo vet, cargo fuzz build, cargo fuzz run (only when
+#   SENTINEL_FUZZ_SECONDS is set), cargo miri test (only when the repo has
+#   unsafe code and nightly has Miri), gitleaks, npm audit, pip-audit, bandit
 set -uo pipefail
 
 mech=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
@@ -100,10 +102,41 @@ if [[ -f Cargo.toml ]]; then
         done
         return "$rc"
     }
+    fuzz_run() {
+        local rc=0 d t targets stamp log
+        for d in "${fuzz_dirs[@]}"; do
+            targets=$(cd "$d" && cargo +nightly fuzz list) || { rc=1; continue; }
+            while IFS= read -r t; do
+                [[ -n $t ]] || continue
+                echo "-- $d/fuzz $t"
+                # Artifacts newer than this file are the ones this run wrote.
+                stamp=$(mktemp)
+                log=$(mktemp)
+                # On a crash, libFuzzer prints the input and cargo fuzz prints
+                # its Debug form, so the output goes to a temp file and only
+                # the lines that say what happened are shown.
+                (cd "$d" && cargo +nightly fuzz run "$t" -- -max_total_time="$SENTINEL_FUZZ_SECONDS") \
+                    > "$log" 2>&1 || rc=$?
+                grep -E '^(Done [0-9]+ runs|SUMMARY: |Error: |error(\[E[0-9]+\])?: )' "$log"
+                find "$d/fuzz/artifacts/$t" -type f -newer "$stamp" 2>/dev/null | sed 's/^/artifact: /'
+                rm -f "$stamp" "$log"
+            done <<< "$targets"
+        done
+        return "$rc"
+    }
     if [[ ${#fuzz_dirs[@]} -gt 0 ]]; then
         step report "cargo fuzz build" "$(cargo_sub fuzz)" fuzz_build
+        # Running the targets takes SENTINEL_FUZZ_SECONDS for each one, so it
+        # happens only when that is set: /snt:audit sets it and CI does not.
+        if [[ -z ${SENTINEL_FUZZ_SECONDS:-} ]]; then
+            skip "cargo fuzz run" "SENTINEL_FUZZ_SECONDS is not set"
+        elif [[ ! $SENTINEL_FUZZ_SECONDS =~ ^[1-9][0-9]*$ ]]; then
+            skip "cargo fuzz run" "SENTINEL_FUZZ_SECONDS is not a whole number of seconds"
+        else
+            step report "cargo fuzz run (${SENTINEL_FUZZ_SECONDS}s per target)" "$(cargo_sub fuzz)" fuzz_run
+        fi
     else
-        skip "cargo fuzz build" "no fuzz/ directory at the root or in any workspace member"
+        skip "cargo fuzz build and run" "no fuzz/ directory at the root or in any workspace member"
     fi
 
     # Miri checks unsafe code for undefined behavior, so it runs only when the
@@ -137,6 +170,29 @@ while read -r section value; do
 done < <(awk '/^[a-z-]+:/ { section = $1; sub(/:$/, "", section); next }
               /^[[:space:]]*-[[:space:]]*[^#[:space:]]/ { print section, $2 }' "$mech/semgrep.yml")
 step gate "semgrep" semgrep semgrep "${semgrep_args[@]}" .
+
+# semgrep's p/secrets sees only the working tree. gitleaks reads the diff of
+# every commit on every ref, so a secret that was committed and later removed
+# still shows.
+gitleaks_history() {
+    local report rc=0
+    report=$(mktemp) || return 1
+    # --redact covers gitleaks' output and its report. Debug logging prints
+    # decoded secrets in the clear, so the level is pinned to info.
+    gitleaks git --redact --no-banner --log-level info \
+        --report-format json --report-path "$report" . || rc=$?
+    # A finding's matched text can hold more than the one secret it redacts,
+    # so print only each fingerprint (commit:file:rule:line), which is also
+    # the form .gitleaksignore takes.
+    [[ ! -s $report ]] || python3 -c 'import json,sys; sys.stdout.write("".join("leak: " + f["Fingerprint"] + "\n" for f in json.load(open(sys.argv[1]))))' "$report"
+    rm -f "$report"
+    return "$rc"
+}
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    step report "gitleaks (git history)" gitleaks gitleaks_history
+else
+    skip "gitleaks" "not a git repository"
+fi
 
 if [[ -f package.json ]]; then
     if [[ -f package-lock.json ]]; then

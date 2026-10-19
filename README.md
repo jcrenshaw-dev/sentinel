@@ -26,7 +26,7 @@ Each project runs the sentinel version its `.sentinel` submodule is pinned to. U
 
 What `/snt:audit` runs, in order:
 
-1. **Mechanical checks.** `.sentinel/mechanical/check.sh .`, with its output saved to `audit/check.txt`.
+1. **Mechanical checks.** `.sentinel/mechanical/check.sh .`, with each fuzz target run for 60 seconds and the output saved to `audit/check.txt`.
 2. **Claude Security scan.** `/claude-security`, a release, branch or quick scan, picked when the step starts. Its report is copied to `audit/claude-security.md`. After a whole-repository scan, any production file the scan did not cover is flagged with an ALERT, and a scoped scan of those files is offered. Its suggest-patches job is never run.
 3. **Lens pass.** Eight review prompts, one concern each, run once each on Claude, on Codex, on both, or skipped. You choose each time, and the question states the cost. `.sentinel/lenses.sh` runs them.
 4. **Check.** Read-only subagents trace every lens finding the Claude Security report and `THREAT-MODEL.md` don't already cover, and only the confirmed ones reach `audit/lenses.md`.
@@ -48,7 +48,7 @@ Everything the audit writes goes under `audit/`, apart from Claude Security's ow
 | `mechanical/install.sh` | Installs those tools on Arch Linux. |
 | `mechanical/deny.toml` | cargo-deny baseline. A repo's own `deny.toml` takes precedence. |
 | `mechanical/semgrep.yml` | The semgrep rulesets check.sh runs, and the rules it skips. |
-| `ci/fast.yml` | The pull request workflow for GitHub Actions and Forgejo Actions. |
+| `ci/fast.yml` | The pull request and push-to-main workflow for GitHub Actions and Forgejo Actions. |
 | `ci/install-tools.sh` | Installs the mechanical tools on a Debian or Ubuntu CI runner. |
 | `ci/security-review.sh`, `ci/security-review.md` | The pull request review `fast.yml` runs, and its prompt. |
 | `ci/read-review.sh` | Decrypts a pull request's private review on your machine. |
@@ -74,7 +74,9 @@ Gates fail the run when they fail or when the tool is not installed. Everything 
 | `cargo geiger`, once per workspace member | `Cargo.toml` exists | report |
 | `cargo vet --locked` | `supply-chain/` exists | report |
 | `cargo +nightly fuzz build` | a `fuzz/` directory at the root or in any workspace member | report |
+| `cargo +nightly fuzz run` on each target `cargo fuzz list` names, for `SENTINEL_FUZZ_SECONDS` seconds each. It shows only the lines that say what happened and the path of each new artifact, never the crashing input. | a `fuzz/` directory, and `SENTINEL_FUZZ_SECONDS` set (`/snt:audit` sets it to 60 unless it is already set; CI does not set it) | report |
 | `cargo +nightly miri test --workspace --lib --bins` (unit tests only: Miri cannot run tests that start processes) | the repo's own Rust code has an `unsafe` block, fn, impl, trait or extern, and nightly has Miri installed (CI runners skip it) | report |
+| `gitleaks git --redact` over every commit on every ref. It shows only each finding's fingerprint (`commit:file:rule:line`), never the secret or the line it is on. | the repo is a git checkout | report |
 | `npm audit` | `package.json` and `package-lock.json` exist | report |
 | `pip-audit -r requirements.txt` and `pip-audit .`, one run for each that applies | `requirements.txt`, and `pyproject.toml` with a `[project]` table | report |
 | `bandit -r .` | `pyproject.toml` or `requirements.txt` exists | report |
@@ -118,7 +120,7 @@ gh secret set ANTHROPIC_API_KEY -R <owner>/<repo>
 
 If the project needs system libraries to build, add them to the install step.
 
-`fast.yml` runs on every pull request. The `mechanical` job runs check.sh with the gating tools on GitHub and Forgejo. The `security-review` job then runs `ci/security-review.sh`, on GitHub only, because it posts its result as a pull request comment through the GitHub API. It installs a pinned Claude Code (2.1.300) on Node 22, has Claude Opus 5.5 review the pull request's diff against `THREAT-MODEL.md` with read-only tools and none of the pull request's own `.claude` settings loaded, and writes the review in the finding format. The checkout keeps no GitHub token in `.git/config`, the reviewer is refused any read outside the checkout and inside `.git`, and output that contains the API key is deleted and fails the job instead of being posted. The job fails when the review did not run or its output holds neither findings nor a "No findings" marker, so a passing check means a review happened. Findings do not fail the job; they are posted for the author to read. The actions the workflow uses are pinned to commits, not tags. Pull requests opened by Dependabot skip the review, because GitHub gives them no Actions secrets; the mechanical job's dependency checks still run on them. On a runner without rustup, `install-tools.sh` downloads a pinned rustup-init version and refuses it unless its SHA-256 matches the one in the script.
+`fast.yml` runs on every pull request and every push to `main`. The `mechanical` job runs on both, on GitHub and Forgejo, and runs check.sh with the gating tools and gitleaks. It fetches the whole history so gitleaks can read it, and it never runs the fuzz targets, because CI does not set `SENTINEL_FUZZ_SECONDS`. The `security-review` job runs `ci/security-review.sh` alongside it, on GitHub pull requests only, because it posts its result as a pull request comment through the GitHub API. It does not wait for the mechanical job, so a failing gate, such as a new advisory against a dependency already in use, does not skip the review. It installs a pinned Claude Code (2.1.300) on Node 22, has Claude Opus 5.5 review the pull request's diff against `THREAT-MODEL.md` with read-only tools and none of the pull request's own `.claude` settings loaded, and writes the review in the finding format. The checkout keeps no GitHub token in `.git/config`, the reviewer is refused any read outside the checkout and inside `.git`, and output that contains the API key is deleted and fails the job instead of being posted. The job fails when the review did not run or its output holds neither findings nor a "No findings" marker, so a passing check means a review happened. Findings do not fail the job; they are posted for the author to read. The actions the workflow uses are pinned to commits, not tags. Pull requests opened by Dependabot skip the review, because GitHub gives them no Actions secrets; the mechanical job's dependency checks still run on them. On a runner without rustup, `install-tools.sh` downloads a pinned rustup-init version and refuses it unless its SHA-256 matches the one in the script. It pins cargo-audit, cargo-deny, semgrep and gitleaks to versions in the script too, and checks gitleaks's download against its SHA-256 the same way.
 
 On a public repo the comment, the job log and the job summary are public, and a review can describe a bug in code that is already released. Set the repository variable `SENTINEL_REVIEW_AGE_RECIPIENT` to your [age](https://github.com/FiloSottile/age) public key and the job installs age, encrypts the review to the `security-review` artifact (kept 14 days), and the comment, log and summary show only the count of findings by severity. The artifact is readable by anyone who can read the repo, but only your key opens it. Read it from the repo's checkout:
 

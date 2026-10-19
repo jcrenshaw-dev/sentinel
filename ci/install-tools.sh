@@ -5,7 +5,7 @@
 #
 # Usage: install-tools.sh
 #   The gating tools: cargo-audit, cargo-deny and clippy when the repo has a
-#   Cargo.toml, and semgrep.
+#   Cargo.toml, and semgrep. Also gitleaks, which check.sh only reports.
 #
 # Works as root without sudo (Forgejo runner images) and as a normal user with
 # sudo (GitHub runners). New PATH entries are written to $GITHUB_PATH, which
@@ -61,7 +61,31 @@ if [[ -f Cargo.toml ]]; then
         break
     done
     [[ -z $pinned ]] || rustup toolchain install "$pinned" --profile minimal --component clippy
-    cargo install --locked cargo-audit cargo-deny
+    # Pinned so a new release can't change what the gates check. Bump the
+    # versions here, from crates.io. A change to the RustSec database's format
+    # can need a newer cargo-audit.
+    cargo install --locked cargo-audit@0.22.2 cargo-deny@0.20.2
 fi
 
-pipx install semgrep
+# Pinned like the cargo tools; bump the version here, from PyPI.
+pipx install semgrep==1.181.0
+
+# gitleaks comes from its GitHub release instead of apt, so every runner gets
+# the same version. Its version and SHA-256 are pinned here, like
+# rustup-init's; bump them together, from the release's checksums file.
+gitleaks_version=8.30.1
+case $(uname -m) in
+    x86_64) gitleaks_arch=x64
+            sum=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb ;;
+    aarch64) gitleaks_arch=arm64
+             sum=e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080 ;;
+    *) echo "install-tools.sh: no pinned gitleaks for $(uname -m)" >&2; exit 1 ;;
+esac
+tarball=$(mktemp)
+# GitHub serves release files through a redirect, hence -L.
+curl --proto '=https' --tlsv1.2 -sSfL -o "$tarball" \
+    "https://github.com/gitleaks/gitleaks/releases/download/v$gitleaks_version/gitleaks_${gitleaks_version}_linux_$gitleaks_arch.tar.gz"
+echo "$sum  $tarball" | sha256sum -c --quiet -
+mkdir -p "$HOME/.local/bin"
+tar -xzf "$tarball" -C "$HOME/.local/bin" gitleaks
+rm -f "$tarball"

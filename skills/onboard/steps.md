@@ -68,7 +68,7 @@ With it set, the review is encrypted and the comment shows only the count of fin
 Add a `SECURITY.md` with:
 
 - How to report a vulnerability. Ask the user for the contact or channel; never make one up.
-- What runs on every pull request: the workflows from step 6, what each one checks, and whether it fails the pull request.
+- What runs on every pull request and every push to main: the workflows from step 6, what each one checks, and whether it fails the pull request.
 - What the full audit runs, step by step, following `.sentinel/skills/audit/steps.md`. Say that it only finds and records: it fixes nothing and writes no tests.
 - A link to https://github.com/jcrenshaw-dev/sentinel.
 

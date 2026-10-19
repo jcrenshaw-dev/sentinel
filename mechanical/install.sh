@@ -8,7 +8,7 @@ set -euo pipefail
 
 command -v pacman >/dev/null || { echo "install.sh: this script is for Arch Linux (pacman not found)" >&2; exit 2; }
 
-pkgs=(base-devel git openssl pkgconf python python-pipx nodejs npm)
+pkgs=(base-devel git openssl pkgconf python python-pipx nodejs npm gitleaks)
 # Leave an existing rustup alone, including one installed with rustup-init.
 # pacman's rustup conflicts with the rust package; if rust is installed,
 # pacman asks whether to replace it.
