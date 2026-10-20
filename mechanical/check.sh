@@ -198,38 +198,51 @@ else
     skip "gitleaks" "not a git repository"
 fi
 
+# tracked [pathspec...] prints, NUL-separated, the tracked regular files that
+# match. Symlinks and files that resolve outside the repo are left out: both
+# linters below print the lines they can't parse or complain about,
+# so a link to a file elsewhere (a key, /proc/self/environ) would put that
+# file in the output, and on CI in a public log.
+tracked() {
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    local f
+    while IFS= read -r -d '' f; do
+        [[ -f $f && ! -L $f && $(realpath -- "$f") == "$repo"/* ]] && printf '%s\0' "$f"
+    done < <(git ls-files -z -- "$@")
+    return 0
+}
+
 # Shell scripts are the tracked files named *.sh or *.bash and the tracked
 # files whose first line runs sh or bash. zsh scripts are left out, since the
 # linter can't read zsh. -S warning keeps style notes out of the report.
 shell_files=()
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    while IFS= read -r -d '' f; do
-        [[ -f $f && ! -L $f ]] || continue
-        case $f in
-            *.sh | *.bash) shell_files+=("$f") ;;
-            *) [[ $(head -c 128 "$f" | head -n 1 | tr -d '\0') =~ ^#!.*[/[:space:]](ba)?sh([[:space:]]|$) ]] &&
-                   shell_files+=("$f") ;;
-        esac
-    done < <(git ls-files -z)
-fi
+while IFS= read -r -d '' f; do
+    case $f in
+        *.sh | *.bash) shell_files+=("$f") ;;
+        *) [[ $(head -c 128 "$f" | head -n 1 | tr -d '\0') =~ ^#!.*[/[:space:]](ba)?sh([[:space:]]|$) ]] &&
+               shell_files+=("$f") ;;
+    esac
+done < <(tracked)
 if [[ ${#shell_files[@]} -gt 0 ]]; then
     step report "shellcheck (${#shell_files[@]} scripts)" shellcheck shellcheck -S warning "${shell_files[@]}"
 else
     skip "shellcheck" "no tracked shell scripts"
 fi
 
-# zizmor finds GitHub's workflows, composite actions and dependabot.yml on
-# its own; Forgejo's workflows are passed by name. --offline keeps it off the
-# network and away from any GitHub token in the environment.
+# zizmor gets the tracked workflow, composite action and dependabot.yml
+# files by name, not the directory, so it never follows a link out of the
+# repo. --offline keeps it off the network and away from any GitHub token in
+# the environment.
 zizmor_inputs=()
-[[ ! -d .github ]] || zizmor_inputs+=(.)
-for f in .forgejo/workflows/*.yml .forgejo/workflows/*.yaml; do
-    [[ ! -f $f ]] || zizmor_inputs+=("$f")
-done
+while IFS= read -r -d '' f; do zizmor_inputs+=("$f"); done < <(tracked \
+    ':(glob).github/workflows/*.yml' ':(glob).github/workflows/*.yaml' \
+    ':(glob).forgejo/workflows/*.yml' ':(glob).forgejo/workflows/*.yaml' \
+    ':(glob).github/dependabot.yml' ':(glob).github/dependabot.yaml' \
+    ':(glob)**/action.yml' ':(glob)**/action.yaml')
 if [[ ${#zizmor_inputs[@]} -gt 0 ]]; then
     step report "zizmor" zizmor zizmor --offline --no-progress "${zizmor_inputs[@]}"
 else
-    skip "zizmor" "no .github directory or Forgejo workflows"
+    skip "zizmor" "no tracked workflows, actions or dependabot.yml"
 fi
 
 if [[ -f package.json ]]; then

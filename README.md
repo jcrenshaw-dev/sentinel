@@ -78,10 +78,12 @@ Gates fail the run when they fail or when the tool is not installed. Everything 
 | `cargo +nightly miri test --workspace --lib --bins` (unit tests only: Miri cannot run tests that start processes) | the repo's own Rust code has an `unsafe` block, fn, impl, trait or extern, and nightly has Miri installed (CI runners skip it) | report |
 | `gitleaks git --redact` over every commit on every ref. It shows only each finding's fingerprint (`commit:file:rule:line`), never the secret or the line it is on. | the repo is a git checkout | report |
 | `shellcheck -S warning` (errors and warnings, no style notes) on the tracked files named `*.sh` or `*.bash` and the tracked files whose first line runs `sh` or `bash`. zsh scripts are left out, since shellcheck can't read zsh. | the repo is a git checkout with at least one such script | report |
-| `zizmor --offline`: GitHub workflows, composite actions and `dependabot.yml`, plus any workflows in `.forgejo/workflows/`. Offline, it makes no network calls and uses no GitHub token, so it skips the audits that need GitHub's API, such as known-vulnerable action versions. | a `.github` directory or Forgejo workflows exist | report |
+| `zizmor --offline` on the tracked workflows in `.github/workflows/` and `.forgejo/workflows/`, every tracked `action.yml`, and `.github/dependabot.yml`. Offline, it makes no network calls and uses no GitHub token, so it skips the audits that need GitHub's API, such as known-vulnerable action versions. | the repo has at least one such tracked file | report |
 | `npm audit` | `package.json` and `package-lock.json` exist | report |
 | `pip-audit -r requirements.txt` and `pip-audit .`, one run for each that applies | `requirements.txt`, and `pyproject.toml` with a `[project]` table | report |
 | `bandit -r .` | `pyproject.toml` or `requirements.txt` exists | report |
+
+shellcheck and zizmor get only tracked regular files that resolve inside the repo, never a symlink. Both print the lines they complain about, so a symlink posing as a script or workflow could otherwise put a file from elsewhere, a key or `/proc/self/environ`, into the output, and on CI into a public log.
 
 semgrep runs with `--metrics=off`. `semgrep.yml` also lists rules to skip: the three p/rust rules that flag reading the program's arguments or its own path (`args`, `args-os`, `current-exe`), which fire on every command-line tool.
 
