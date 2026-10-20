@@ -1,6 +1,6 @@
 # Findings log
 
-One row per step of each audit: `check.sh`, `claude-security` with the scan in brackets (`(release)`, `(branch)`, `(quick)` or `(skipped files)`), or `lenses` with the choice in brackets (`(claude)`, `(codex)`, `(both)` or `(skipped)`). "What it found" is the tools that failed, for check.sh, or the count of findings by severity, for Claude Security and the lenses. "Notes" is yours to fill in.
+One row per step of each audit: `check.sh`, `claude-security` with the scan in brackets (`(release)`, `(branch)`, `(quick)` or `(skipped files)`), or `lenses` with the choice in brackets (`(claude)`, `(codex)`, `(both)` or `(skipped)`), and a `threat-model` row when the audit went on with THREAT-MODEL.md out of date. "What it found" is the tools that failed, for check.sh, or the count of findings by severity, for Claude Security and the lenses. "Notes" is yours to fill in.
 
 This file in sentinel stays an empty template. `/snt:audit` keeps the filled-in copy for each project at `audit/findings-log.md` in that project, which stays out of git with the rest of `audit/`: a row counts findings, and some of them may not be fixed yet.
 

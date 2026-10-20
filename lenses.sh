@@ -137,6 +137,9 @@ fi
     echo "commit: $(git -C "$repo" rev-parse --verify -q HEAD 2>/dev/null || echo none)"
     echo "uncommitted changes: $([[ -n $(git -C "$repo" status --porcelain -- . "${excludes[@]}") ]] && echo yes || echo no)"
     echo "sentinel commit: $(git -C "$sentinel" rev-parse --verify -q HEAD 2>/dev/null || echo none)"
+    # The lenses judge against THREAT-MODEL.md, so record how current it was.
+    tm_age=$("$sentinel/threat-model-age.sh" "$repo" || true)
+    echo "threat model: ${tm_age%%$'\n'*}"
     echo "started: $ts"
     echo "providers: ${providers[*]}"
     [[ ${providers[*]} != *claude* ]] || echo "claude: model $MODEL, effort $EFFORT, auth: $claude_auth"

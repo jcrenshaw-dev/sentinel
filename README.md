@@ -26,6 +26,8 @@ Each project runs the sentinel version its `.sentinel` submodule is pinned to. U
 
 What `/snt:audit` runs, in order:
 
+0. **Threat model age.** `.sentinel/threat-model-age.sh .` compares the commit `THREAT-MODEL.md` names with HEAD and lists the files changed since. If production files it covers changed, the audit stops and asks whether to update it first or continue with the gap logged, because every later step judges findings against it.
+
 1. **Mechanical checks.** `.sentinel/mechanical/check.sh .`, with each fuzz target run for 60 seconds and the output saved to `audit/check.txt`.
 2. **Claude Security scan.** `/claude-security`, a release, branch or quick scan, picked when the step starts. Its report is copied to `audit/claude-security.md`. After a whole-repository scan, any production file the scan did not cover is flagged with an ALERT, and a scoped scan of those files is offered. Its suggest-patches job is never run.
 3. **Lens pass.** Eight review prompts, one concern each, run once each on Claude, on Codex, on both, or skipped. You choose each time, and the question states the cost. `.sentinel/lenses.sh` runs them.
@@ -42,6 +44,8 @@ Everything the audit writes goes under `audit/`, apart from Claude Security's ow
 | `threat-model.template.md` | The template for a project's `THREAT-MODEL.md`. The pull request review reads it first, and `/snt:onboard` copies its key points into the security-guidance rules. |
 | `lenses/*.md` | Eight review prompts, one concern each: data exposure, path handling, untrusted input, permissions, resource limits, hook execution, supply chain, crypto and state. |
 | `lenses.sh` | Runs every lens once through `claude -p`, `codex exec` or both. |
+| `lens-events.py` | Reads the lens runs' JSON events for `lenses.sh`: each Claude run's reply, model and safeguard stops, and which files each run read, for `coverage.txt`. |
+| `threat-model-age.sh` | Says how far `THREAT-MODEL.md` is behind HEAD, and which files changed since the commit it names. |
 | `finding-format.md` | The format the pull request review and the lenses write their findings in. |
 | `skills/<name>/steps.md` | The steps of `/snt:audit` and `/snt:onboard`. The plugin's skills are short stubs that read these from the project's `.sentinel`, so the steps always match the pinned kit. |
 | `mechanical/check.sh` | Runs cargo audit, cargo deny, clippy, semgrep and the rest, depending on what the repo contains. |
