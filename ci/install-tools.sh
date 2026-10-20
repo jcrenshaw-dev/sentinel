@@ -5,7 +5,8 @@
 #
 # Usage: install-tools.sh
 #   The gating tools: cargo-audit, cargo-deny and clippy when the repo has a
-#   Cargo.toml, and semgrep. Also gitleaks, which check.sh only reports.
+#   Cargo.toml, and semgrep. Also gitleaks, shellcheck and zizmor, which
+#   check.sh only reports.
 #
 # Works as root without sudo (Forgejo runner images) and as a normal user with
 # sudo (GitHub runners). New PATH entries are written to $GITHUB_PATH, which
@@ -89,3 +90,24 @@ echo "$sum  $tarball" | sha256sum -c --quiet -
 mkdir -p "$HOME/.local/bin"
 tar -xzf "$tarball" -C "$HOME/.local/bin" gitleaks
 rm -f "$tarball"
+
+# The shellcheck binary is pinned the same way, from its static release
+# build. The SHA-256 is the one GitHub records for the release file; bump the
+# two together.
+shellcheck_version=0.11.0
+case $(uname -m) in
+    x86_64) shellcheck_arch=x86_64
+            sum=b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6 ;;
+    aarch64) shellcheck_arch=aarch64
+             sum=68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc ;;
+    *) echo "install-tools.sh: no pinned shellcheck for $(uname -m)" >&2; exit 1 ;;
+esac
+tarball=$(mktemp)
+curl --proto '=https' --tlsv1.2 -sSfL -o "$tarball" \
+    "https://github.com/koalaman/shellcheck/releases/download/v$shellcheck_version/shellcheck-v$shellcheck_version.linux.$shellcheck_arch.tar.gz"
+echo "$sum  $tarball" | sha256sum -c --quiet -
+tar -xzf "$tarball" -C "$HOME/.local/bin" --strip-components=1 "shellcheck-v$shellcheck_version/shellcheck"
+rm -f "$tarball"
+
+# Pinned like semgrep; bump the version here, from PyPI.
+pipx install zizmor==1.30.1

@@ -9,7 +9,8 @@
 # Reported only (output shown, exit code ignored):
 #   cargo geiger, cargo vet, cargo fuzz build, cargo fuzz run (only when
 #   SENTINEL_FUZZ_SECONDS is set), cargo miri test (only when the repo has
-#   unsafe code and nightly has Miri), gitleaks, npm audit, pip-audit, bandit
+#   unsafe code and nightly has Miri), gitleaks, shellcheck, zizmor,
+#   npm audit, pip-audit, bandit
 set -uo pipefail
 
 mech=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
@@ -195,6 +196,40 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     step report "gitleaks (git history)" gitleaks gitleaks_history
 else
     skip "gitleaks" "not a git repository"
+fi
+
+# Shell scripts are the tracked files named *.sh or *.bash and the tracked
+# files whose first line runs sh or bash. zsh scripts are left out, since the
+# linter can't read zsh. -S warning keeps style notes out of the report.
+shell_files=()
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    while IFS= read -r -d '' f; do
+        [[ -f $f && ! -L $f ]] || continue
+        case $f in
+            *.sh | *.bash) shell_files+=("$f") ;;
+            *) [[ $(head -c 128 "$f" | head -n 1 | tr -d '\0') =~ ^#!.*[/[:space:]](ba)?sh([[:space:]]|$) ]] &&
+                   shell_files+=("$f") ;;
+        esac
+    done < <(git ls-files -z)
+fi
+if [[ ${#shell_files[@]} -gt 0 ]]; then
+    step report "shellcheck (${#shell_files[@]} scripts)" shellcheck shellcheck -S warning "${shell_files[@]}"
+else
+    skip "shellcheck" "no tracked shell scripts"
+fi
+
+# zizmor finds GitHub's workflows, composite actions and dependabot.yml on
+# its own; Forgejo's workflows are passed by name. --offline keeps it off the
+# network and away from any GitHub token in the environment.
+zizmor_inputs=()
+[[ ! -d .github ]] || zizmor_inputs+=(.)
+for f in .forgejo/workflows/*.yml .forgejo/workflows/*.yaml; do
+    [[ ! -f $f ]] || zizmor_inputs+=("$f")
+done
+if [[ ${#zizmor_inputs[@]} -gt 0 ]]; then
+    step report "zizmor" zizmor zizmor --offline --no-progress "${zizmor_inputs[@]}"
+else
+    skip "zizmor" "no .github directory or Forgejo workflows"
 fi
 
 if [[ -f package.json ]]; then
