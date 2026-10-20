@@ -4,9 +4,11 @@
     lens-events.py coverage <snapshot> <reads-dir> <coverage.txt>
 
 The first form writes the files one run read to <reads>, as JSON mapping each
-snapshot path to "full" or "part", and prints three lines: the models that
-wrote output, comma separated, "blocked" when a safeguard stopped the reply,
-and how many files the run read in full. For Claude it also writes the reply
+snapshot path to "full" or "part", and prints four lines: the models that
+wrote output, comma separated, "blocked" when the reply ended in a refusal,
+how many files the run read in full, and how many times a safeguard stopped
+a reply during the run. A safeguard can stop one reply and the model carry
+on to a complete report, so only a refusal at the end counts as blocked. For Claude it also writes the reply
 to <dest>.md.part, and exits 1 when the events hold no result.
 
 A file counts as read only when its contents reached the model. For Claude
@@ -272,7 +274,7 @@ def run(mode, events_path, dest, reads_path, root):
     read = reads.result()
     with open(reads_path, "w") as f:
         json.dump(read, f)
-    models, blocked = [], ""
+    models, blocked, stops = [], "", 0
     if mode == "claude":
         if result is None:
             sys.exit(1)
@@ -281,13 +283,15 @@ def run(mode, events_path, dest, reads_path, root):
         # Model names are cut to safe characters before they reach the terminal.
         models = [re.sub(r"[^A-Za-z0-9._-]", "", m)
                   for m, u in (result.get("modelUsage") or {}).items() if u.get("outputTokens")]
-        if result.get("safety_stops") or result.get("stop_reason") == "refusal":
+        if result.get("stop_reason") == "refusal":
             blocked = "blocked"
+        stops = result.get("safety_stops") if isinstance(result.get("safety_stops"), int) else 0
         print("stop_reason: %s, safety_stops: %s" % (result.get("stop_reason"), result.get("safety_stops")),
               file=sys.stderr)
     print(",".join(models))
     print(blocked)
     print(sum(1 for v in read.values() if v == "full"))
+    print(stops)
 
 
 def coverage(root, reads_dir, dest):

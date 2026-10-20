@@ -196,7 +196,7 @@ check_report() {
 }
 
 # finish <dest> <rc> [blocked] keeps the report only when the run succeeded,
-# no safeguard stopped it and it reads as a report. Anything else goes to the
+# the reply didn't end in a refusal and it reads as a report. Anything else goes to the
 # end of the .log and leaves no .md, so step 4 never reads it as a report.
 # Sets result and adds to notes, both the caller's locals.
 finish() {
@@ -204,7 +204,7 @@ finish() {
     if [[ $2 -ne 0 ]]; then
         result="FAILED (exit $2, see ${1#"$out/"}.log)"
     elif [[ -n ${3:-} ]]; then
-        result="BLOCKED (a safeguard stopped the reply, see ${1#"$out/"}.log)"
+        result="BLOCKED (the reply ended in a refusal, see ${1#"$out/"}.log)"
     elif ! problems=$(check_report "$1.md.part"); then
         result="UNPARSEABLE (no findings and no 'No findings' block, see ${1#"$out/"}.log)"
     else
@@ -220,8 +220,8 @@ finish() {
 
 # parse_run <claude|codex> <events> <dest> <lens> records the files the run
 # read in $work/reads/<provider>-<lens> and prints the models that wrote
-# output, "blocked" when a safeguard stopped the reply, and the number of
-# files read in full, one per line. For Claude it also writes the reply to
+# output, "blocked" when the reply ended in a refusal, the number of files
+# read in full, and the number of safety stops during the run, one per line. For Claude it also writes the reply to
 # <dest>.md.part. lens-events.py says what counts as read.
 parse_run() {
     python3 -I "$sentinel/lens-events.py" "$1" "$2" "$3" "$work/reads/$1-$4" "$work/repo"
@@ -229,7 +229,7 @@ parse_run() {
 
 run_claude() { # lens prompt
     local dest="$out/claude/$1" json="$work/claude-$1.jsonl" start=$SECONDS rc=0
-    local result notes=() info models="" blocked="" nread=0 m
+    local result notes=() info models="" blocked="" nread=0 stops=0 m
     local envs=(-u OPENAI_API_KEY -u CODEX_API_KEY -u SENTINEL_ANTHROPIC_API_KEY -u ANTHROPIC_API_KEY)
     [[ -z $claude_key ]] || envs+=("ANTHROPIC_API_KEY=$claude_key")
     (cd "$work/repo" && env "${envs[@]}" \
@@ -244,7 +244,8 @@ run_claude() { # lens prompt
     # leaves out. They stay in the temp folder, so step 4 reads only the .md
     # reports.
     if [[ -s $json ]] && info=$(parse_run claude "$json" "$dest" "$1" 2>> "$dest.log"); then
-        { read -r models || true; read -r blocked || true; read -r nread || true; } <<< "$info"
+        { read -r models || true; read -r blocked || true; read -r nread || true
+          read -r stops || true; } <<< "$info"
     else
         tail -n 20 "$json" >> "$dest.log"
         [[ $rc -ne 0 ]] || rc=1
@@ -256,6 +257,9 @@ run_claude() { # lens prompt
         [[ $m == *"${MODEL%%\[*}"* ]] || { notes+=("MODEL DIFFERS (asked for $MODEL)"); break; }
     done
     finish "$dest" "$rc" "$blocked" || rc=1
+    # A safeguard can stop one reply and the model carry on to a complete
+    # report. The report is kept, and the note tells step 4 to say so.
+    [[ $result != ok || $stops -eq 0 ]] || notes+=("SAFETY STOP during the run ($stops), report kept")
     counted claude "$1" "$nread"
     status claude "$1" $((SECONDS - start)) "$result" "${notes[@]}"
     return "$rc"
@@ -299,7 +303,7 @@ run_codex() { # lens prompt
     # error they hold into the .log. They name no model, so only the format
     # is checked.
     if [[ -s $events ]] && info=$(parse_run codex "$events" "$dest" "$1" 2>> "$dest.log"); then
-        nread=$(tail -n 1 <<< "$info")
+        nread=$(sed -n 3p <<< "$info")
     fi
     finish "$dest" "$rc" || rc=1
     counted codex "$1" "$nread"
