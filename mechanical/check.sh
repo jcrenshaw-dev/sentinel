@@ -3,6 +3,7 @@
 #
 # Usage: check.sh [repo-dir=.]
 #   SENTINEL_FUZZ_SECONDS=<n> also runs each fuzz target for n seconds.
+#   SENTINEL_FUZZ_JOBS=<n> runs n fuzz targets at a time (default 1).
 #
 # Gates (a failure, or the tool missing, makes the exit code non-zero):
 #   cargo audit, cargo deny, cargo clippy, semgrep
@@ -105,26 +106,53 @@ if [[ -f Cargo.toml ]]; then
         done
         return "$rc"
     }
+    # fuzz_one <dir> <target> <report> runs one target and writes what
+    # happened to <report>, so targets running side by side don't mix their
+    # lines.
+    fuzz_one() {
+        local d=$1 t=$2 stamp log rc=0
+        # Artifacts newer than this file are the ones this run wrote.
+        stamp=$(mktemp)
+        log=$(mktemp)
+        # On a crash, libFuzzer prints the input and cargo fuzz prints its
+        # Debug form, so the output goes to a temp file and only the lines
+        # that say what happened are shown.
+        (cd "$d" && cargo +nightly fuzz run "$t" -- -max_total_time="$SENTINEL_FUZZ_SECONDS") \
+            > "$log" 2>&1 || rc=$?
+        {
+            echo "-- $d/fuzz $t"
+            grep -E '^(Done [0-9]+ runs|SUMMARY: |Error: |error(\[E[0-9]+\])?: )' "$log"
+            find "$d/fuzz/artifacts/$t" -type f -newer "$stamp" 2>/dev/null | sed 's/^/artifact: /'
+        } > "$3"
+        rm -f "$stamp" "$log"
+        return "$rc"
+    }
+    # Runs SENTINEL_FUZZ_JOBS targets at a time. The oldest run is always
+    # the one waited for, so reports print in target order, each as soon as
+    # its run and every run before it are done.
     fuzz_run() {
-        local rc=0 d t targets stamp log
+        local rc=0 d t targets reports n=0 pids=() ids=()
+        reports=$(mktemp -d)
+        # wait_oldest prints the oldest run's report once it finishes.
+        wait_oldest() {
+            wait "${pids[0]}" || rc=$?
+            cat "$reports/${ids[0]}"
+            pids=("${pids[@]:1}")
+            ids=("${ids[@]:1}")
+        }
         for d in "${fuzz_dirs[@]}"; do
             targets=$(cd "$d" && cargo +nightly fuzz list) || { rc=1; continue; }
             while IFS= read -r t; do
                 [[ -n $t ]] || continue
-                echo "-- $d/fuzz $t"
-                # Artifacts newer than this file are the ones this run wrote.
-                stamp=$(mktemp)
-                log=$(mktemp)
-                # On a crash, libFuzzer prints the input and cargo fuzz prints
-                # its Debug form, so the output goes to a temp file and only
-                # the lines that say what happened are shown.
-                (cd "$d" && cargo +nightly fuzz run "$t" -- -max_total_time="$SENTINEL_FUZZ_SECONDS") \
-                    > "$log" 2>&1 || rc=$?
-                grep -E '^(Done [0-9]+ runs|SUMMARY: |Error: |error(\[E[0-9]+\])?: )' "$log"
-                find "$d/fuzz/artifacts/$t" -type f -newer "$stamp" 2>/dev/null | sed 's/^/artifact: /'
-                rm -f "$stamp" "$log"
+                fuzz_one "$d" "$t" "$reports/$n" &
+                pids+=($!)
+                ids+=("$n")
+                n=$((n + 1))
+                (( ${#pids[@]} < SENTINEL_FUZZ_JOBS )) || wait_oldest
             done <<< "$targets"
         done
+        while (( ${#pids[@]} > 0 )); do wait_oldest; done
+        rm -rf "$reports"
         return "$rc"
     }
     if [[ ${#fuzz_dirs[@]} -gt 0 ]]; then
@@ -135,8 +163,12 @@ if [[ -f Cargo.toml ]]; then
             skip "cargo fuzz run" "SENTINEL_FUZZ_SECONDS is not set"
         elif [[ ! $SENTINEL_FUZZ_SECONDS =~ ^[1-9][0-9]*$ ]]; then
             skip "cargo fuzz run" "SENTINEL_FUZZ_SECONDS is not a whole number of seconds"
+        elif [[ ! ${SENTINEL_FUZZ_JOBS:=1} =~ ^[1-9][0-9]*$ ]]; then
+            skip "cargo fuzz run" "SENTINEL_FUZZ_JOBS is not a whole number"
         else
-            step report "cargo fuzz run (${SENTINEL_FUZZ_SECONDS}s per target)" "$(cargo_sub fuzz)" fuzz_run
+            at_once=""
+            [[ $SENTINEL_FUZZ_JOBS -eq 1 ]] || at_once=", $SENTINEL_FUZZ_JOBS at a time"
+            step report "cargo fuzz run (${SENTINEL_FUZZ_SECONDS}s per target$at_once)" "$(cargo_sub fuzz)" fuzz_run
         fi
     else
         skip "cargo fuzz build and run" "no fuzz/ directory at the root or in any workspace member"

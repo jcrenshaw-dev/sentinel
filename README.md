@@ -74,7 +74,7 @@ Gates fail the run when they fail or when the tool is not installed. Everything 
 | `cargo geiger`, once per workspace member | `Cargo.toml` exists | report |
 | `cargo vet --locked` | `supply-chain/` exists | report |
 | `cargo +nightly fuzz build` | a `fuzz/` directory at the root or in any workspace member | report |
-| `cargo +nightly fuzz run` on each target `cargo fuzz list` names, for `SENTINEL_FUZZ_SECONDS` seconds each. It shows only the lines that say what happened and the path of each new artifact, never the crashing input. | a `fuzz/` directory, and `SENTINEL_FUZZ_SECONDS` set (`/snt:audit` sets it to 60 unless it is already set; CI does not set it) | report |
+| `cargo +nightly fuzz run` on each target `cargo fuzz list` names, for `SENTINEL_FUZZ_SECONDS` seconds each, `SENTINEL_FUZZ_JOBS` targets at a time (default 1). It shows only the lines that say what happened and the path of each new artifact, never the crashing input. | a `fuzz/` directory, and `SENTINEL_FUZZ_SECONDS` set (`/snt:audit` sets it to 60 unless it is already set; CI does not set it) | report |
 | `cargo +nightly miri test --workspace --lib --bins` (unit tests only: Miri cannot run tests that start processes) | the repo's own Rust code has an `unsafe` block, fn, impl, trait or extern, and nightly has Miri installed (CI runners skip it) | report |
 | `gitleaks git --redact` over every commit on every ref. It shows only each finding's fingerprint (`commit:file:rule:line`), never the secret or the line it is on. | the repo is a git checkout | report |
 | `shellcheck -S warning` (errors and warnings, no style notes) on the tracked files named `*.sh` or `*.bash` and the tracked files whose first line runs `sh` or `bash`. zsh scripts are left out, since shellcheck can't read zsh. | the repo is a git checkout with at least one such script | report |
@@ -82,6 +82,14 @@ Gates fail the run when they fail or when the tool is not installed. Everything 
 | `npm audit` | `package.json` and `package-lock.json` exist | report |
 | `pip-audit -r requirements.txt` and `pip-audit .`, one run for each that applies | `requirements.txt`, and `pyproject.toml` with a `[project]` table | report |
 | `bandit -r .` | `pyproject.toml` or `requirements.txt` exists | report |
+
+The 60 seconds `/snt:audit` gives each target is a smoke test. For a longer run, give each target more time and run several at once. Each run starts from the inputs earlier runs found, which cargo fuzz keeps in `fuzz/corpus/`. For example, an hour per target, eight at a time:
+
+```
+SENTINEL_FUZZ_SECONDS=3600 SENTINEL_FUZZ_JOBS=8 .sentinel/mechanical/check.sh . > audit/fuzz-long.txt
+```
+
+Each target can use up to libFuzzer's default memory limit of 2 GB, so keep `SENTINEL_FUZZ_JOBS` under your memory in GB divided by 2, and under your core count.
 
 shellcheck and zizmor get only tracked regular files that resolve inside the repo, never a symlink. Both print the lines they complain about, so a symlink posing as a script or workflow could otherwise put a file from elsewhere, a key or `/proc/self/environ`, into the output, and on CI into a public log.
 
