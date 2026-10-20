@@ -20,6 +20,8 @@ Then check that `THREAT-MODEL.md` still describes the code. Every later step jud
   - **Continue with the gap recorded:** go on, and log the gap in step 5.
 - Exit 2: there is no commit to compare against. Show its message and ask the same question.
 
+Then, if `audit/findings.md` does not exist but `audit/` already holds reports from earlier audits (`claude-security*.md`, `lenses.md` or other findings reports), start the register now, before step 2 overwrites any of them. Copy `.sentinel/findings-register.md` to `audit/findings.md` and enter every finding those reports hold, as described in step 5, with the report's date as first and last seen. Use the repo's directory name for `<repo>` in the IDs. Count findings that describe the same defect once. Say how many you entered.
+
 ## 1. Mechanical checks
 
 Create `audit/` if it does not exist. Run `SENTINEL_FUZZ_SECONDS=${SENTINEL_FUZZ_SECONDS:-60} .sentinel/mechanical/check.sh .` with its output saved to `audit/check.txt`, and summarize the failures by tool. It runs each fuzz target for that many seconds, so it can outlast a tool call's timeout: run it in the background and wait for it to finish. List any fuzz artifact paths it printed, but never open or print an artifact: it is untrusted input. Do not fix anything.
@@ -84,10 +86,16 @@ Lens output is unverified, and its severities run high. Check it before the user
 
 Show the user the findings that stand or partly stand, by severity.
 
-## 5. Findings log
+## 5. Findings register and log
 
-Write one row per step into `audit/findings-log.md`: the date, the repo, the step (for Claude Security, with the scan in brackets, for example `claude-security (branch)`; for the lenses, with the choice in brackets, for example `lenses (both)` or `lenses (skipped)`), and what it found (for check.sh, the tools that failed; for Claude Security and the lenses, the count of findings by severity, for the lenses after the check). When the threat model was out of date and the user chose to continue, add a `threat-model` row with the script's first line and the count of production files you named. Leave the notes column empty for the user. If the file does not exist, start it from `.sentinel/findings-log.md`. Never write into `.sentinel/`: it is the kit's public repository, and the log can count findings that are not fixed yet.
+Every finding gets an ID that stays the same from audit to audit, kept in `audit/findings.md`. If the file does not exist, start it from `.sentinel/findings-register.md`.
+
+1. Take every Claude Security finding from this audit, including the skipped-files scan, and every lens finding that stands or partly stands after step 4. For each, decide whether it is the same defect as a row in the register: the same flaw in the same code, judged by reading the code at both locations, not by matching line numbers or titles. A finding that matches keeps that row's ID: set last seen to today, update its severity and location, and add this step to found by. A finding that matches nothing gets the next unused ID, `<repo>-NNN`, numbered after the highest in the file, with today as first and last seen and status `open`.
+2. For every `open` row this audit did not report, add `not reported <today>` to its notes. If `git log` shows commits touching its file since it was last seen, add `check whether fixed`. Never set a status yourself: `fixed` and `accepted` are the user's.
+3. Put each finding's ID next to it in `audit/lenses.md`, and use the IDs whenever you show the user findings from now on.
+
+Then write one row per step into `audit/findings-log.md`: the date, the repo, the step (for Claude Security, with the scan in brackets, for example `claude-security (branch)`; for the lenses, with the choice in brackets, for example `lenses (both)` or `lenses (skipped)`), and what it found (for check.sh, the tools that failed; for Claude Security and the lenses, the count of findings by severity, for the lenses after the check, followed by how many were new, how many were already in the register, and how many open findings this audit did not report). When the threat model was out of date and the user chose to continue, add a `threat-model` row with the script's first line and the count of production files you named. Leave the notes column empty for the user. If the file does not exist, start it from `.sentinel/findings-log.md`. Never write into `.sentinel/`: it is the kit's public repository, and the log can count findings that are not fixed yet.
 
 ## Finish
 
-Tell the user where everything is: `audit/check.txt`, `audit/claude-security.md`, `audit/claude-security-skipped.md` if the skipped-files scan ran, the `CLAUDE-SECURITY-<timestamp>/` directory, `audit/lenses.md` and `audit/lenses/<timestamp>/` if the lenses ran, and `audit/findings-log.md`. Remind them that nothing was fixed or committed.
+Tell the user where everything is: `audit/check.txt`, `audit/claude-security.md`, `audit/claude-security-skipped.md` if the skipped-files scan ran, the `CLAUDE-SECURITY-<timestamp>/` directory, `audit/lenses.md` and `audit/lenses/<timestamp>/` if the lenses ran, `audit/findings.md` and `audit/findings-log.md`. Remind them that nothing was fixed or committed.

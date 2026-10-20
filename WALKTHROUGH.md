@@ -66,7 +66,7 @@ It stops after each step.
 | 2. Claude Security scan | `/claude-security`, a release, branch or quick scan, picked when the step starts; its report is copied to `audit/claude-security.md` | The findings by severity, any ALERT line about production files the scan did not cover, and, after a release scan, whether it looked at every trust boundary `THREAT-MODEL.md` names. Rerun it with `--scope` on any it missed. |
 | 3. Lens pass | Asks Claude, Codex, both or skip, with the cost, then runs `.sentinel/lenses.sh` | Your choice. Nothing runs until you make it. |
 | 4. Check | Read-only subagents try to refute each new lens finding, given as a neutral claim with no provider, lens or severity, and the ones that stand go to `audit/lenses.md` | The findings that stand, by severity, what was refuted, and what was set aside and why. |
-| 5. Findings log | One row per step in `audit/findings-log.md`: the tools that failed, and the findings by severity for Claude Security and the lenses | The notes column is yours to fill in. |
+| 5. Findings register and log | Each finding gets its stable ID in `audit/findings.md`, new or matched to a known one, and open findings this audit didn't report get a note. One row per step in `audit/findings-log.md`: the tools that failed, and the findings by severity for Claude Security and the lenses, with counts of new, known and unreported | Only you set a finding's status to `fixed` or `accepted`. The notes columns are yours to fill in. |
 
 Where everything lands:
 
@@ -78,6 +78,7 @@ Where everything lands:
 | `CLAUDE-SECURITY-<timestamp>/` | Claude Security's own run folder |
 | `audit/lenses/<timestamp>/` | Each lens's raw output and log, per provider |
 | `audit/lenses.md` | The checked lens findings |
+| `audit/findings.md` | Every finding under its stable ID, with when it was first and last seen and its status |
 | `audit/findings-log.md` | The running log for this repo |
 
 `audit/` and `CLAUDE-SECURITY-*/` stay out of git. The audit fixes nothing, writes no tests and commits nothing. What you do with the findings is up to you.
