@@ -6,7 +6,8 @@
 #   SENTINEL_FUZZ_JOBS=<n> runs n fuzz targets at a time (default 1).
 #
 # Gates (a failure, or the tool missing, makes the exit code non-zero):
-#   cargo audit, cargo deny, cargo clippy, semgrep
+#   cargo audit, cargo deny, cargo clippy, semgrep (with the rules in the
+#   repo's .semgrep/ folder, and their tests)
 # Reported only (output shown, exit code ignored):
 #   cargo geiger, cargo vet, cargo fuzz build, cargo fuzz run (only when
 #   SENTINEL_FUZZ_SECONDS is set), cargo miri test (only when the repo has
@@ -56,6 +57,21 @@ skip() { summary+=("SKIPPED  $1 ($2)"); }
 
 # cargo subcommands are separate binaries, so check for those by name.
 cargo_sub() { command -v "cargo-$1" >/dev/null && echo cargo || echo "cargo-$1"; }
+
+# tracked [pathspec...] prints, NUL-separated, the tracked regular files that
+# match, each starting with ./ so no file name reads as an option. Symlinks
+# and files that resolve outside the repo are left out: both linters below
+# print the lines they can't parse or complain about, so a link to a file
+# elsewhere (a key, /proc/self/environ) would put that file in the output,
+# and on CI in a public log.
+tracked() {
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    local f
+    while IFS= read -r -d '' f; do
+        [[ -f $f && ! -L $f && $(realpath -- "$f") == "$repo"/* ]] && printf './%s\0' "$f"
+    done < <(git ls-files -z -- "$@")
+    return 0
+}
 
 if [[ -f Cargo.toml ]]; then
     deny_cfg="$repo/deny.toml"
@@ -204,6 +220,48 @@ while read -r section value; do
     esac
 done < <(awk '/^[a-z-]+:/ { section = $1; sub(/:$/, "", section); next }
               /^[[:space:]]*-[[:space:]]*[^#[:space:]]/ { print section, $2 }' "$mech/semgrep.yml")
+
+# A repo's own rules live in .semgrep/ and run with the kit's, each one
+# written to keep a fixed finding fixed. A rule file is one that starts a
+# top-level rules: list. Its test file has the same name with the target
+# language's extension, and marks the pre-fix code with "ruleid: <id>" and the
+# fixed code with "ok: <id>". The tests run first, so a rule that no longer
+# matches its bug fails here instead of passing quietly, and so does a rule
+# with no test file, which semgrep would otherwise pass. They run on a copy of
+# the tracked regular files outside any dot folder, because semgrep --test
+# skips dot folders, and so a symlink in .semgrep/ can't point the run at a
+# file outside the repo.
+repo_rules=() semgrep_files=()
+while IFS= read -r -d '' f; do
+    semgrep_files+=("$f")
+    case $f in
+        *.yml | *.yaml) ! grep -q '^rules:' "$f" || repo_rules+=("$f") ;;
+    esac
+done < <(tracked ':(glob).semgrep/**')
+rule_tests() {
+    local f g base tested rules_copy missing=0
+    for f in "${repo_rules[@]}"; do
+        base=${f%.*} tested=0
+        for g in "${semgrep_files[@]}"; do
+            [[ $g == "$base".* && $g != "$base.yml" && $g != "$base.yaml" ]] && { tested=1; break; }
+        done
+        [[ $tested -eq 1 ]] || { echo "$f has no test file named ${base#./}.<extension>"; missing=1; }
+    done
+    rules_copy=$(mktemp -d) || return 1
+    for f in "${semgrep_files[@]}"; do
+        mkdir -p "$rules_copy/rules/$(dirname "${f#./.semgrep/}")"
+        cp -- "$f" "$rules_copy/rules/${f#./.semgrep/}"
+    done
+    semgrep --test --metrics=off "$rules_copy/rules" || missing=1
+    rm -rf "$rules_copy"
+    return "$missing"
+}
+semgrep_args+=(--exclude=.semgrep)
+for f in "${repo_rules[@]}"; do semgrep_args+=(--config "$f"); done
+if [[ ${#repo_rules[@]} -gt 0 ]]; then
+    n=${#repo_rules[@]}
+    step gate "semgrep rule tests ($n rule file$([[ $n -eq 1 ]] || echo s) in .semgrep)" semgrep rule_tests
+fi
 step gate "semgrep" semgrep semgrep "${semgrep_args[@]}" .
 
 # semgrep's p/secrets sees only the working tree. gitleaks reads the diff of
@@ -229,21 +287,6 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 else
     skip "gitleaks" "not a git repository"
 fi
-
-# tracked [pathspec...] prints, NUL-separated, the tracked regular files that
-# match, each starting with ./ so no file name reads as an option. Symlinks
-# and files that resolve outside the repo are left out: both linters below
-# print the lines they can't parse or complain about, so a link to a file
-# elsewhere (a key, /proc/self/environ) would put that file in the output,
-# and on CI in a public log.
-tracked() {
-    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
-    local f
-    while IFS= read -r -d '' f; do
-        [[ -f $f && ! -L $f && $(realpath -- "$f") == "$repo"/* ]] && printf './%s\0' "$f"
-    done < <(git ls-files -z -- "$@")
-    return 0
-}
 
 # Shell scripts are the tracked files named *.sh or *.bash and the tracked
 # files whose first line runs sh or bash. zsh scripts are left out, since the

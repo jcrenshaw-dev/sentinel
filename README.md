@@ -74,7 +74,8 @@ Gates fail the run when they fail or when the tool is not installed. Everything 
 | `cargo audit` | `Cargo.toml` exists | gate |
 | `cargo deny check` | `Cargo.toml` exists | gate |
 | `cargo clippy --all-targets -- -W clippy::pedantic -W clippy::nursery` | `Cargo.toml` exists | gate (fails on errors and deny-level lints; pedantic and nursery only warn) |
-| `semgrep scan --error` with the rulesets in `semgrep.yml` | always | gate |
+| `semgrep --test` on the repo's own rules in `.semgrep/` (see below) | `.semgrep/` holds at least one rule file | gate |
+| `semgrep scan --error` with the rulesets in `semgrep.yml` and the repo's rules in `.semgrep/` | always | gate |
 | `cargo geiger`, once per workspace member | `Cargo.toml` exists | report |
 | `cargo vet --locked` | `supply-chain/` exists | report |
 | `cargo +nightly fuzz build` | a `fuzz/` directory at the root or in any workspace member | report |
@@ -98,6 +99,14 @@ Each target can use up to libFuzzer's default memory limit of 2 GB, so keep `SEN
 shellcheck and zizmor get only tracked regular files that resolve inside the repo, never a symlink. Both print the lines they complain about, so a symlink posing as a script or workflow could otherwise put a file from elsewhere, a key or `/proc/self/environ`, into the output, and on CI into a public log.
 
 semgrep runs with `--metrics=off`. `semgrep.yml` also lists rules to skip: the three p/rust rules that flag reading the program's arguments or its own path (`args`, `args-os`, `current-exe`), which fire on every command-line tool.
+
+### Keeping a fixed finding fixed
+
+When you fix a finding whose bug has a shape a pattern can match, add a semgrep rule for it in the repo's `.semgrep/` folder, in the same commit as the fix. check.sh then runs it with the kit's rulesets, so CI blocks that bug from coming back, with no model involved.
+
+Each rule file (`<name>.yaml`, a top-level `rules:` list) needs a test file next to it with the same name and the target language's extension, such as `<name>.rs`. The test file holds the pre-fix code under a `// ruleid: <rule id>` comment and the fixed code under `// ok: <rule id>`. check.sh runs `semgrep --test` on `.semgrep/` before the scan and fails the gate when a rule misses its own bug, flags the fixed code, or has no test file. `.semgrep/` is left out of the scan itself, so the pre-fix code in a test file doesn't fail it. Only tracked regular files count, never a symlink.
+
+Write the rule for the one bug, not the general idea. A rule that flags every `format!` passed to SQL, say, fails on all the safe ones too.
 
 ## lenses.sh
 
