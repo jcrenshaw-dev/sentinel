@@ -36,7 +36,7 @@ Before running `/claude-security`, ask the user which scan to run, in one AskUse
 
 Run the `claude-security` skill with the choice spelled out, so it skips its own menu: "scan the whole repository at medium", "scan this branch's changes at high" or "scan the whole repository at low". If the user typed their own answer, pass it on as written. Leave its cost confirmation to the user. If it reports nothing to scan, stop and say so; do not switch to another scan.
 
-When it finishes, find the newest `CLAUDE-SECURITY-<timestamp>/` directory, copy its `CLAUDE-SECURITY-RESULTS.md` to `audit/claude-security.md`, and show the user the findings by severity.
+When it finishes, find the newest `CLAUDE-SECURITY-<timestamp>/` directory, copy its `CLAUDE-SECURITY-RESULTS.md` to `audit/claude-security.md`, and show the user the findings by severity. A finding that is the same defect as a row in `audit/findings.md` with status `accepted`, judged as in step 5, is left out of that list and shown only as a count, such as "2 accepted findings came back".
 
 After a whole-repository scan, read the report's Coverage section for production files it did not cover: files it says were not assigned to any component, were read only as background, or should not be counted as covered. List every one, and mark any that is test-only code. If there are any, start your report for this step with this line, filled in:
 
@@ -50,9 +50,9 @@ Do not run or offer its suggest-patches job. Patches are fixes, and this audit f
 
 The lenses are eight review prompts in `.sentinel/lenses/`, one concern each, that read the whole repository against `THREAT-MODEL.md`. They find things the Claude Security scan misses, and a second model finds things the first one misses. They cost real money or plan usage, so nothing runs until the user chooses.
 
-Ask the user in one AskUserQuestion whether to run them, and on which model. First check whether `CODEX_API_KEY` or `OPENAI_API_KEY` is set, without printing either, so the question can name the account Codex would bill. Offer exactly these four, with the recommended one first and marked " (Recommended)": Both after a release scan, Claude after a quick scan, Skip after a branch scan (the lenses read the whole repository, not the diff).
+Ask the user in one AskUserQuestion whether to run them, and on which model. First check whether `SENTINEL_ANTHROPIC_API_KEY` or `ANTHROPIC_API_KEY` is set, and whether `CODEX_API_KEY` or `OPENAI_API_KEY` is set, without printing any of them, so the question can name the account each provider would bill. Offer exactly these four, with the recommended one first and marked " (Recommended)": Both after a release scan, Claude after a quick scan, Skip after a branch scan (the lenses read the whole repository, not the diff).
 
-- **Claude:** one run of each lens on the logged-in Claude plan. On Terminus (622 tracked files) this took about 35 minutes and came to about $31 at API prices.
+- **Claude:** one run of each lens, billed to the API key when `SENTINEL_ANTHROPIC_API_KEY` or `ANTHROPIC_API_KEY` is set (name which), or to the logged-in Claude plan when neither is. On Terminus (622 tracked files) this took about 35 minutes and came to about $31 at API prices.
 - **Codex:** one run of each lens on Codex, billed to the API key, or to the Codex login when no key is set. On Terminus this took about 17 minutes and cost about $35.
 - **Both:** the two together.
 - **Skip:** run nothing.
@@ -74,7 +74,8 @@ Lens output is unverified, and its severities run high. Check it before the user
 3. Group findings that describe the same problem, keeping track of which provider and lens reported each. Set aside, with a one-line reason each:
    - those the Claude Security report already has (name its finding),
    - those `THREAT-MODEL.md` already documents (quote the line),
-   - those that need something `THREAT-MODEL.md` says is not an escalation, such as a same-user process that can already write the files.
+   - those that need something `THREAT-MODEL.md` says is not an escalation, such as a same-user process that can already write the files,
+   - those that are the same defect as a row in `audit/findings.md` with status `accepted`, judged as in step 5 (give its ID and the user's reason). Step 5 still updates that row's last seen. Report them only as a count, such as "3 accepted findings came back".
 4. Send the rest to read-only subagents, grouped by area, a handful of claims each. Give each subagent only neutral claims: for each, the location, the trigger and the claimed consequence, in your own words. Never say which provider or lens reported it, what severity the lens gave it, or what any other subagent concluded. Tell each one to read `THREAT-MODEL.md` first, then try to prove each claim wrong: find the check that stops it, the precondition that cannot hold, or the line of `THREAT-MODEL.md` that rules it out, without trusting the claim's line numbers. It returns for each: REFUTED (what stops it, at file:line), PARTLY (what holds and what is refuted, each at file:line), or STANDS (it could not be refuted, with the whole path traced, every step at file:line); whether `THREAT-MODEL.md` documents it; the severity under the threat model's own rules; and the preconditions. Tell them to read only and to write no files. The subagents are Claude, so a finding from a Claude lens is checked by the same model family; say so in `audit/lenses.md`.
 5. Write `audit/lenses.md`:
    - the ALERT line, if there is one, then the unread files by kind;
@@ -90,7 +91,7 @@ Show the user the findings that stand or partly stand, by severity.
 
 Every finding gets an ID that stays the same from audit to audit, kept in `audit/findings.md`. If the file does not exist, start it from `.sentinel/findings-register.md`.
 
-1. Take every Claude Security finding from this audit, including the skipped-files scan, and every lens finding that stands or partly stands after step 4. For each, decide whether it is the same defect as a row in the register: the same flaw in the same code, judged by reading the code at both locations, not by matching line numbers or titles. A finding that matches keeps that row's ID: set last seen to today, update its severity and location, and add this step to found by. A finding that matches nothing gets the next unused ID, `<repo>-NNN`, numbered after the highest in the file, with today as first and last seen and status `open`.
+1. Take every Claude Security finding from this audit, including the skipped-files scan, every lens finding that stands or partly stands after step 4, and every lens finding step 4 set aside as accepted. For each, decide whether it is the same defect as a row in the register: the same flaw in the same code, judged by reading the code at both locations, not by matching line numbers or titles. A finding that matches keeps that row's ID: set last seen to today, update its severity and location, and add this step to found by. A finding that matches nothing gets the next unused ID, `<repo>-NNN`, numbered after the highest in the file, with today as first and last seen and status `open`.
 2. For every `open` row this audit did not report, add `not reported <today>` to its notes. If `git log` shows commits touching its file since it was last seen, add `check whether fixed`. Never set a status yourself: `fixed` and `accepted` are the user's.
 3. Put each finding's ID next to it in `audit/lenses.md`, and use the IDs whenever you show the user findings from now on.
 
