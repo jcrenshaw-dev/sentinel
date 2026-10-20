@@ -49,7 +49,7 @@ Ask the user in one AskUserQuestion whether to run them, and on which model. Fir
 
 Say in the question that the costs come from Terminus and grow with the size of the repository.
 
-If the answer includes Codex and `codex` is not on PATH, say so and stop this step. Otherwise run `.sentinel/lenses.sh . <claude|codex|both>` and wait for it. It prints where the results went, `audit/lenses/<timestamp>/`, and a line for each run, also kept in `run.txt`. The line says `ok`, `FAILED`, `BLOCKED` (a safeguard stopped the reply) or `UNPARSEABLE` (the reply has no finding and no `No findings` block, a refusal for one). A Claude run's line also names the model that answered and says `MODEL DIFFERS` when it is not the one asked for, and an `ok` line names any finding that is missing a field. A run that is not `ok` left no report: show the end of its `.log` and ask before running it again. Never rerun on your own: a failed run can be a spent quota.
+If the answer includes Codex and `codex` is not on PATH, say so and stop this step. Otherwise run `.sentinel/lenses.sh . <claude|codex|both>` and wait for it. It prints where the results went, `audit/lenses/<timestamp>/`, and a line for each run, also kept in `run.txt`. The line says `ok`, `FAILED`, `BLOCKED` (a safeguard stopped the reply) or `UNPARSEABLE` (the reply has no finding and no `No findings` block, a refusal for one). A Claude run's line also names the model that answered and says `MODEL DIFFERS` when it is not the one asked for, and an `ok` line names any finding that is missing a field and how many of the snapshot's files the run read. It also writes `coverage.txt`: the files no run with a report read, then every file with the runs that read it. A Claude run's reads are its Read calls; a Codex run's are the snapshot paths named in commands that exited 0. A run that is not `ok` left no report: show the end of its `.log` and ask before running it again. Never rerun on your own: a failed run can be a spent quota.
 
 On Skip, go straight to step 5 and log `lenses (skipped)`.
 
@@ -58,13 +58,17 @@ On Skip, go straight to step 5 and log `lenses (skipped)`.
 Lens output is unverified, and its severities run high. Check it before the user sees it. This step reads only: never build, run or test the code, and never write an exploit or a proof of concept.
 
 1. Read `audit/lenses/<timestamp>/run.txt` and every `## Finding` block in the `<provider>/<lens>.md` reports next to it, then `THREAT-MODEL.md`, `audit/claude-security.md` and, if it exists, `audit/claude-security-skipped.md`.
-2. Group findings that describe the same problem, keeping track of which provider and lens reported each. Set aside, with a one-line reason each:
+2. Read the "Read by no run" list in `coverage.txt`. Mark each file as production code, test-only, or not code (docs, data, lock files, images). If any production files are left, start `audit/lenses.md` and your report for this step with this line, filled in:
+
+   `ALERT: the lenses did not read <N> production files: <paths>. This audit is not complete until they are reviewed.`
+3. Group findings that describe the same problem, keeping track of which provider and lens reported each. Set aside, with a one-line reason each:
    - those the Claude Security report already has (name its finding),
    - those `THREAT-MODEL.md` already documents (quote the line),
    - those that need something `THREAT-MODEL.md` says is not an escalation, such as a same-user process that can already write the files.
-3. Send the rest to read-only subagents, grouped by area, a handful of findings each. Each one reads `THREAT-MODEL.md` first, traces its findings in the code at file:line without trusting the lens's line numbers or claims, and returns for each: CONFIRMED (the whole path traced, every step at file:line), PARTLY (what holds and what doesn't), or NOT CONFIRMED (why); whether `THREAT-MODEL.md` documents it; the severity under the threat model's own rules; and the preconditions. Tell them to read only and to write no files.
-4. Write `audit/lenses.md`:
-   - first, every run in `run.txt` that is not `ok` or says `MODEL DIFFERS`, so the pass can't look complete when it isn't. A lens with no `ok` run on any provider was not covered;
+4. Send the rest to read-only subagents, grouped by area, a handful of findings each. Each one reads `THREAT-MODEL.md` first, traces its findings in the code at file:line without trusting the lens's line numbers or claims, and returns for each: CONFIRMED (the whole path traced, every step at file:line), PARTLY (what holds and what doesn't), or NOT CONFIRMED (why); whether `THREAT-MODEL.md` documents it; the severity under the threat model's own rules; and the preconditions. Tell them to read only and to write no files.
+5. Write `audit/lenses.md`:
+   - the ALERT line, if there is one, then the unread files by kind;
+   - every run in `run.txt` that is not `ok` or says `MODEL DIFFERS`, so the pass can't look complete when it isn't. A lens with no `ok` run on any provider was not covered;
    - the confirmed and partly confirmed findings by severity, each with its path, the provider and lens that found it, and its preconditions. A finding `run.txt` says is missing a field is checked like the rest, with the missing fields named next to it;
    - the set-aside list with reasons;
    - any line of `THREAT-MODEL.md` the check found to be wrong.

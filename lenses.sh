@@ -4,7 +4,8 @@
 # Usage: lenses.sh <repo-dir> <claude|codex|both>
 #
 # Writes <repo-dir>/audit/lenses/<timestamp>/<provider>/<lens>.md, a <lens>.log
-# next to each, and run.txt describing the run and listing each run's status.
+# next to each, run.txt describing the run and listing each run's status, and
+# coverage.txt listing which files the runs read.
 # A run that fails, is stopped by a safeguard or doesn't read as a report
 # leaves only its .log, so the check never reads an error message or a
 # refusal as a report.
@@ -98,6 +99,8 @@ mkdir "$work/repo"
 links=$(cd "$work/repo" && find . -type l -printf '%P -> %l\0' |
     LC_ALL=C tr -d '\001-\037\177' | tr '\0' '\n')
 find "$work/repo" -type l -delete
+snapshot_files=$(find "$work/repo" -type f -printf '.' | wc -c)
+mkdir "$work/reads"
 
 # Claude: --safe-mode skips the user's and the repo's hooks, plugins, MCP
 # servers and CLAUDE.md, and --setting-sources "" loads no settings file, so
@@ -212,42 +215,103 @@ finish() {
     return 1
 }
 
-# claude_result <json> <dest> writes the reply to <dest>.md.part and prints
-# two lines: the models that wrote output, comma separated, and "blocked"
-# when a safeguard stopped the reply. Model names are cut to safe characters
-# before they reach the terminal. Python runs isolated (-I) so a json.py in
-# the working directory can't stand in for the standard library's.
-claude_result() {
+# parse_run <claude|codex> <events> <dest> <lens> reads a run's JSON events.
+# It writes the files the run read to $work/reads/<provider>-<lens>, as paths
+# in the snapshot separated by NUL bytes, and prints three lines: the models
+# that wrote output, comma separated, "blocked" when a safeguard stopped the
+# reply, and the number of files read. For Claude it also writes the reply to
+# <dest>.md.part, and fails when the events hold no result. Claude reads
+# through its Read tool. Codex reads through shell commands, so a snapshot
+# path named in a command that exited 0 counts as read. Model names are cut to
+# safe characters before they reach the terminal. Python runs isolated (-I)
+# so a json.py in the working directory can't stand in for the standard
+# library's.
+parse_run() {
     python3 -I -c '
-import json, re, sys
-d = json.load(open(sys.argv[1]))
-with open(sys.argv[2] + ".md.part", "w") as f:
-    f.write(d.get("result") or "")
-models = [re.sub(r"[^A-Za-z0-9._-]", "", m) for m, u in (d.get("modelUsage") or {}).items() if u.get("outputTokens")]
+import json, os, re, shlex, sys
+mode, events, dest, reads, root = sys.argv[1:]
+root = os.path.realpath(root)
+
+def in_snapshot(p):
+    p = os.path.realpath(os.path.join(root, p))
+    rel = os.path.relpath(p, root)
+    return rel if not rel.startswith("..") and os.path.isfile(p) else None
+
+def tokens(cmd):
+    try:
+        parts = shlex.split(cmd)
+        if len(parts) >= 3 and parts[-2] in ("-lc", "-c"):
+            cmd = parts[-1]
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        return list(lex)
+    except ValueError:
+        return []
+
+read, result = set(), None
+for line in open(events, errors="replace"):
+    try:
+        d = json.loads(line)
+    except ValueError:
+        continue
+    if not isinstance(d, dict):
+        continue
+    t = d.get("type")
+    if mode == "claude" and t == "assistant":
+        for c in d.get("message", {}).get("content") or []:
+            if c.get("type") == "tool_use" and c.get("name") == "Read":
+                rel = in_snapshot(str(c.get("input", {}).get("file_path", "")))
+                if rel:
+                    read.add(rel)
+    elif mode == "claude" and t == "result":
+        result = d
+    elif mode == "codex" and t == "item.completed":
+        item = d.get("item") or {}
+        if item.get("type") == "command_execution" and item.get("exit_code") == 0:
+            for tok in tokens(str(item.get("command", ""))):
+                rel = in_snapshot(tok)
+                if rel:
+                    read.add(rel)
+    elif mode == "codex" and t in ("error", "turn.failed"):
+        print(d.get("message") or (d.get("error") or {}).get("message"), file=sys.stderr)
+
+with open(reads, "w") as f:
+    f.write("\0".join(sorted(read)))
+models, blocked = [], ""
+if mode == "claude":
+    if result is None:
+        sys.exit(1)
+    with open(dest + ".md.part", "w") as f:
+        f.write(result.get("result") or "")
+    models = [re.sub(r"[^A-Za-z0-9._-]", "", m) for m, u in (result.get("modelUsage") or {}).items() if u.get("outputTokens")]
+    blocked = "blocked" if result.get("safety_stops") or result.get("stop_reason") == "refusal" else ""
+    print("stop_reason: %s, safety_stops: %s" % (result.get("stop_reason"), result.get("safety_stops")), file=sys.stderr)
 print(",".join(models))
-print("blocked" if d.get("safety_stops") or d.get("stop_reason") == "refusal" else "")
-print("stop_reason: %s, safety_stops: %s" % (d.get("stop_reason"), d.get("safety_stops")), file=sys.stderr)
-' "$1" "$2"
+print(blocked)
+print(len(read))
+' "$1" "$2" "$3" "$work/reads/$1-$4" "$work/repo"
 }
 
 run_claude() { # lens prompt
-    local dest="$out/claude/$1" json="$work/claude-$1.json" start=$SECONDS rc=0
-    local result notes=() info models="" blocked="" m
+    local dest="$out/claude/$1" json="$work/claude-$1.jsonl" start=$SECONDS rc=0
+    local result notes=() info models="" blocked="" nread=0 m
     local envs=(-u OPENAI_API_KEY -u CODEX_API_KEY -u SENTINEL_ANTHROPIC_API_KEY -u ANTHROPIC_API_KEY)
     [[ -z $claude_key ]] || envs+=("ANTHROPIC_API_KEY=$claude_key")
     (cd "$work/repo" && env "${envs[@]}" \
         timeout --kill-after=30 "$RUN_TIMEOUT" \
         claude -p --safe-mode --model "$MODEL" --effort "$EFFORT" \
             --setting-sources "" --tools "Read,Grep,Glob" \
-            --permission-mode dontAsk --no-session-persistence --output-format json \
+            --permission-mode dontAsk --no-session-persistence \
+            --output-format stream-json --verbose \
         < "$2" > "$json" 2> "$dest.log") || rc=$?
-    # The JSON names the models that wrote the reply and says whether a
-    # safeguard stopped it, which the text output leaves out. The JSON itself
-    # stays in the temp folder, so step 4 reads only the .md reports.
-    if [[ -s $json ]] && info=$(claude_result "$json" "$dest" 2>> "$dest.log"); then
-        { read -r models || true; read -r blocked || true; } <<< "$info"
+    # The events record each file the run read, name the models that wrote
+    # the reply and say whether a safeguard stopped it, which the text output
+    # leaves out. They stay in the temp folder, so step 4 reads only the .md
+    # reports.
+    if [[ -s $json ]] && info=$(parse_run claude "$json" "$dest" "$1" 2>> "$dest.log"); then
+        { read -r models || true; read -r blocked || true; read -r nread || true; } <<< "$info"
     else
-        cat "$json" >> "$dest.log"
+        tail -n 20 "$json" >> "$dest.log"
         [[ $rc -ne 0 ]] || rc=1
     fi
     notes+=("model ${models:-not reported}")
@@ -257,12 +321,25 @@ run_claude() { # lens prompt
         [[ $m == *"${MODEL%%\[*}"* ]] || { notes+=("MODEL DIFFERS (asked for $MODEL)"); break; }
     done
     finish "$dest" "$rc" "$blocked" || rc=1
+    counted claude "$1" "$nread"
     status claude "$1" $((SECONDS - start)) "$result" "${notes[@]}"
     return "$rc"
 }
 
+# counted <provider> <lens> <files read> adds the count to the run's notes
+# when it made a report. A run that made none drops its list of reads, so
+# coverage.txt counts only files some report was written from.
+counted() {
+    if [[ $result == ok ]]; then
+        notes+=("read $3 of $snapshot_files files")
+    else
+        rm -f "$work/reads/$1-$2"
+    fi
+}
+
 run_codex() { # lens prompt
-    local dest="$out/codex/$1" start=$SECONDS rc=0 result notes=()
+    local dest="$out/codex/$1" events="$work/codex-$1.jsonl" start=$SECONDS rc=0
+    local result notes=() info nread=0
     # Codex's --sandbox read-only lets the model's commands read the whole disk
     # (home directory, keys), and it silently overrides any permission profile,
     # so it is not used. The "audit" profile makes only the system directories
@@ -277,14 +354,20 @@ run_codex() { # lens prompt
                 -c 'shell_environment_policy.inherit="core"'
                 -c 'web_search="disabled"'
                 -c "model_reasoning_effort=$CODEX_EFFORT" -c project_doc_max_bytes=0
-                -o "$dest.md.part")
+                --json -o "$dest.md.part")
     [[ -z $CODEX_MODEL ]] || args+=(-m "$CODEX_MODEL")
     local envs=(-u ANTHROPIC_API_KEY -u SENTINEL_ANTHROPIC_API_KEY -u OPENAI_API_KEY "CODEX_HOME=$codex_home")
     [[ -z $codex_key ]] || envs+=("CODEX_API_KEY=$codex_key")
     env "${envs[@]}" timeout --kill-after=30 "$RUN_TIMEOUT" codex "${args[@]}" - \
-        < "$2" > "$dest.log" 2>&1 || rc=$?
-    # Codex's output names no model, so only the format is checked.
+        < "$2" > "$events" 2> "$dest.log" || rc=$?
+    # The events record each command the run ran, and parse_run copies any
+    # error they hold into the .log. They name no model, so only the format
+    # is checked.
+    if [[ -s $events ]] && info=$(parse_run codex "$events" "$dest" "$1" 2>> "$dest.log"); then
+        nread=$(tail -n 1 <<< "$info")
+    fi
     finish "$dest" "$rc" || rc=1
+    counted codex "$1" "$nread"
     status codex "$1" $((SECONDS - start)) "$result" "${notes[@]}"
     return "$rc"
 }
@@ -311,6 +394,32 @@ for provider in "${providers[@]}"; do
     done
     for pid in "${pids[@]}"; do wait "$pid" || failed=$((failed + 1)); done
 done
+
+# coverage.txt lists the files in the snapshot no run with a report read,
+# then every file with the runs that read it. Step 4 decides which unread
+# files are production code. Control characters are stripped from the names,
+# as in run.txt.
+python3 -I -c '
+import os, re, sys
+root, reads, dest = sys.argv[1:]
+by_file = {}
+for name in sorted(os.listdir(reads)):
+    run = name.replace("-", "/", 1)
+    with open(os.path.join(reads, name)) as f:
+        for p in filter(None, f.read().split("\0")):
+            by_file.setdefault(p, []).append(run)
+files = sorted(os.path.relpath(os.path.join(d, f), root) for d, _, fs in os.walk(root) for f in fs)
+clean = lambda p: re.sub(r"[\x00-\x1f\x7f-\x9f]", "", p)
+unread = [p for p in files if p not in by_file]
+with open(dest, "w") as out:
+    out.write("%d of %d files in the snapshot were read by a run that made a report.\n\n" % (len(files) - len(unread), len(files)))
+    out.write("Read by no run:\n")
+    out.writelines("  %s\n" % clean(p) for p in unread)
+    out.write("  none\n" if not unread else "")
+    out.write("\nRead by:\n")
+    out.writelines("  %s: %s\n" % (clean(p), ", ".join(by_file[p])) for p in files if p in by_file)
+print("Coverage: %d of %d files read, %d read by no run; see coverage.txt" % (len(files) - len(unread), len(files), len(unread)))
+' "$work/repo" "$work/reads" "$out/coverage.txt"
 
 echo
 echo "$((total - failed)) of $total runs succeeded. Results: $out"
