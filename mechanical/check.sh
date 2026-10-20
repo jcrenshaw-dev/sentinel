@@ -199,15 +199,16 @@ else
 fi
 
 # tracked [pathspec...] prints, NUL-separated, the tracked regular files that
-# match. Symlinks and files that resolve outside the repo are left out: both
-# linters below print the lines they can't parse or complain about,
-# so a link to a file elsewhere (a key, /proc/self/environ) would put that
-# file in the output, and on CI in a public log.
+# match, each starting with ./ so no file name reads as an option. Symlinks
+# and files that resolve outside the repo are left out: both linters below
+# print the lines they can't parse or complain about, so a link to a file
+# elsewhere (a key, /proc/self/environ) would put that file in the output,
+# and on CI in a public log.
 tracked() {
     git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
     local f
     while IFS= read -r -d '' f; do
-        [[ -f $f && ! -L $f && $(realpath -- "$f") == "$repo"/* ]] && printf '%s\0' "$f"
+        [[ -f $f && ! -L $f && $(realpath -- "$f") == "$repo"/* ]] && printf './%s\0' "$f"
     done < <(git ls-files -z -- "$@")
     return 0
 }
