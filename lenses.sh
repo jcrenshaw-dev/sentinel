@@ -215,81 +215,13 @@ finish() {
     return 1
 }
 
-# parse_run <claude|codex> <events> <dest> <lens> reads a run's JSON events.
-# It writes the files the run read to $work/reads/<provider>-<lens>, as paths
-# in the snapshot separated by NUL bytes, and prints three lines: the models
-# that wrote output, comma separated, "blocked" when a safeguard stopped the
-# reply, and the number of files read. For Claude it also writes the reply to
-# <dest>.md.part, and fails when the events hold no result. Claude reads
-# through its Read tool. Codex reads through shell commands, so a snapshot
-# path named in a command that exited 0 counts as read. Model names are cut to
-# safe characters before they reach the terminal. Python runs isolated (-I)
-# so a json.py in the working directory can't stand in for the standard
-# library's.
+# parse_run <claude|codex> <events> <dest> <lens> records the files the run
+# read in $work/reads/<provider>-<lens> and prints the models that wrote
+# output, "blocked" when a safeguard stopped the reply, and the number of
+# files read in full, one per line. For Claude it also writes the reply to
+# <dest>.md.part. lens-events.py says what counts as read.
 parse_run() {
-    python3 -I -c '
-import json, os, re, shlex, sys
-mode, events, dest, reads, root = sys.argv[1:]
-root = os.path.realpath(root)
-
-def in_snapshot(p):
-    p = os.path.realpath(os.path.join(root, p))
-    rel = os.path.relpath(p, root)
-    return rel if not rel.startswith("..") and os.path.isfile(p) else None
-
-def tokens(cmd):
-    try:
-        parts = shlex.split(cmd)
-        if len(parts) >= 3 and parts[-2] in ("-lc", "-c"):
-            cmd = parts[-1]
-        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
-        lex.whitespace_split = True
-        return list(lex)
-    except ValueError:
-        return []
-
-read, result = set(), None
-for line in open(events, errors="replace"):
-    try:
-        d = json.loads(line)
-    except ValueError:
-        continue
-    if not isinstance(d, dict):
-        continue
-    t = d.get("type")
-    if mode == "claude" and t == "assistant":
-        for c in d.get("message", {}).get("content") or []:
-            if c.get("type") == "tool_use" and c.get("name") == "Read":
-                rel = in_snapshot(str(c.get("input", {}).get("file_path", "")))
-                if rel:
-                    read.add(rel)
-    elif mode == "claude" and t == "result":
-        result = d
-    elif mode == "codex" and t == "item.completed":
-        item = d.get("item") or {}
-        if item.get("type") == "command_execution" and item.get("exit_code") == 0:
-            for tok in tokens(str(item.get("command", ""))):
-                rel = in_snapshot(tok)
-                if rel:
-                    read.add(rel)
-    elif mode == "codex" and t in ("error", "turn.failed"):
-        print(d.get("message") or (d.get("error") or {}).get("message"), file=sys.stderr)
-
-with open(reads, "w") as f:
-    f.write("\0".join(sorted(read)))
-models, blocked = [], ""
-if mode == "claude":
-    if result is None:
-        sys.exit(1)
-    with open(dest + ".md.part", "w") as f:
-        f.write(result.get("result") or "")
-    models = [re.sub(r"[^A-Za-z0-9._-]", "", m) for m, u in (result.get("modelUsage") or {}).items() if u.get("outputTokens")]
-    blocked = "blocked" if result.get("safety_stops") or result.get("stop_reason") == "refusal" else ""
-    print("stop_reason: %s, safety_stops: %s" % (result.get("stop_reason"), result.get("safety_stops")), file=sys.stderr)
-print(",".join(models))
-print(blocked)
-print(len(read))
-' "$1" "$2" "$3" "$work/reads/$1-$4" "$work/repo"
+    python3 -I "$sentinel/lens-events.py" "$1" "$2" "$3" "$work/reads/$1-$4" "$work/repo"
 }
 
 run_claude() { # lens prompt
@@ -331,7 +263,7 @@ run_claude() { # lens prompt
 # coverage.txt counts only files some report was written from.
 counted() {
     if [[ $result == ok ]]; then
-        notes+=("read $3 of $snapshot_files files")
+        notes+=("read $3 of $snapshot_files files in full")
     else
         rm -f "$work/reads/$1-$2"
     fi
@@ -396,30 +328,9 @@ for provider in "${providers[@]}"; do
 done
 
 # coverage.txt lists the files in the snapshot no run with a report read,
-# then every file with the runs that read it. Step 4 decides which unread
-# files are production code. Control characters are stripped from the names,
-# as in run.txt.
-python3 -I -c '
-import os, re, sys
-root, reads, dest = sys.argv[1:]
-by_file = {}
-for name in sorted(os.listdir(reads)):
-    run = name.replace("-", "/", 1)
-    with open(os.path.join(reads, name)) as f:
-        for p in filter(None, f.read().split("\0")):
-            by_file.setdefault(p, []).append(run)
-files = sorted(os.path.relpath(os.path.join(d, f), root) for d, _, fs in os.walk(root) for f in fs)
-clean = lambda p: re.sub(r"[\x00-\x1f\x7f-\x9f]", "", p)
-unread = [p for p in files if p not in by_file]
-with open(dest, "w") as out:
-    out.write("%d of %d files in the snapshot were read by a run that made a report.\n\n" % (len(files) - len(unread), len(files)))
-    out.write("Read by no run:\n")
-    out.writelines("  %s\n" % clean(p) for p in unread)
-    out.write("  none\n" if not unread else "")
-    out.write("\nRead by:\n")
-    out.writelines("  %s: %s\n" % (clean(p), ", ".join(by_file[p])) for p in files if p in by_file)
-print("Coverage: %d of %d files read, %d read by no run; see coverage.txt" % (len(files) - len(unread), len(files), len(unread)))
-' "$work/repo" "$work/reads" "$out/coverage.txt"
+# then those read only in part, then every file with the runs that read it.
+# Step 4 decides which of them are production code.
+python3 -I "$sentinel/lens-events.py" coverage "$work/repo" "$work/reads" "$out/coverage.txt"
 
 echo
 echo "$((total - failed)) of $total runs succeeded. Results: $out"
