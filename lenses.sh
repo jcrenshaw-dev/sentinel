@@ -4,8 +4,10 @@
 # Usage: lenses.sh <repo-dir> <claude|codex|both>
 #
 # Writes <repo-dir>/audit/lenses/<timestamp>/<provider>/<lens>.md, a <lens>.log
-# next to each, and run.txt describing the run. A run that fails leaves only
-# its .log, so the check never reads an error message as a report.
+# next to each, and run.txt describing the run and listing each run's status.
+# A run that fails, is stopped by a safeguard or doesn't read as a report
+# leaves only its .log, so the check never reads an error message or a
+# refusal as a report.
 set -euo pipefail
 
 MODEL="${SENTINEL_MODEL:-opus}"
@@ -148,40 +150,119 @@ fi
 cat "$out/run.txt"
 echo
 
-status() { # provider lens rc seconds
-    local secs=$4 result
-    if [[ $3 -eq 0 ]]; then result="ok"; else result="FAILED (exit $3, see $1/$2.log)"; fi
-    printf '[%s] %-17s %s in %dm%02ds\n' "$1" "$2" "$result" $((secs / 60)) $((secs % 60))
+# Prints the run's line and adds it to run.txt, so the check in step 4 sees
+# which runs were blocked, unreadable or answered by another model.
+status() { # provider lens seconds result [note...]
+    local secs=$3 line note
+    line=$(printf '[%s] %-17s %s in %dm%02ds' "$1" "$2" "$4" $((secs / 60)) $((secs % 60)))
+    shift 4
+    for note; do line+="; $note"; done
+    echo "$line"
+    echo "$line" >> "$out/run.txt"
 }
 
-finish() { # dest rc -> keeps the report only when the run succeeded
-    if [[ $2 -eq 0 && -s $1.md.part ]]; then
+# check_report <file> fails when the file is not a report in the shape
+# finding-format.md asks for: no "## Finding:" block, and no "## No findings"
+# block with an examined list. A refusal or a reply that ignored the format
+# would otherwise reach step 4 as "nothing found". It prints one line for
+# each finding block that is missing a field, by number only, since the
+# titles are model output.
+check_report() {
+    awk 'BEGIN { split("location severity trigger consequence related", fields, " ") }
+         function close_block(   i, m) {
+             if (!in_block) return
+             m = ""
+             for (i = 1; i <= 5; i++) if (!(fields[i] in seen)) m = m (m == "" ? "" : ", ") fields[i]
+             if (m != "") print "finding " n " is missing " m
+             in_block = 0
+         }
+         /^```/ { fence = !fence; next }
+         fence { next }
+         /^## Finding:/ { close_block(); n++; in_block = 1; no_findings = 0; split("", seen); found = 1; next }
+         /^## No findings/ { close_block(); no_findings = 1; next }
+         /^## / { close_block(); no_findings = 0; next }
+         { line = tolower($0) }
+         in_block && match(line, /^[-*][[:space:]]*`?[a-z]+`?[[:space:]]*:/) {
+             f = substr(line, 1, RLENGTH); gsub(/[^a-z]/, "", f); seen[f] = 1
+         }
+         no_findings && line ~ /^[-*][[:space:]]*`?examined`?[[:space:]]*:/ { examined = 1 }
+         END { close_block(); exit !(found || examined) }' "$1"
+}
+
+# finish <dest> <rc> [blocked] keeps the report only when the run succeeded,
+# no safeguard stopped it and it reads as a report. Anything else goes to the
+# end of the .log and leaves no .md, so step 4 never reads it as a report.
+# Sets result and adds to notes, both the caller's locals.
+finish() {
+    local problems line
+    if [[ $2 -ne 0 ]]; then
+        result="FAILED (exit $2, see ${1#"$out/"}.log)"
+    elif [[ -n ${3:-} ]]; then
+        result="BLOCKED (a safeguard stopped the reply, see ${1#"$out/"}.log)"
+    elif ! problems=$(check_report "$1.md.part"); then
+        result="UNPARSEABLE (no findings and no 'No findings' block, see ${1#"$out/"}.log)"
+    else
         mv "$1.md.part" "$1.md"
+        result="ok"
+        [[ -z $problems ]] || while IFS= read -r line; do notes+=("$line"); done <<< "$problems"
         return 0
     fi
     [[ ! -s $1.md.part ]] || cat "$1.md.part" >> "$1.log"
     rm -f "$1.md.part"
-    [[ $2 -ne 0 ]] || return 1
-    return "$2"
+    return 1
+}
+
+# claude_result <json> <dest> writes the reply to <dest>.md.part and prints
+# two lines: the models that wrote output, comma separated, and "blocked"
+# when a safeguard stopped the reply. Model names are cut to safe characters
+# before they reach the terminal. Python runs isolated (-I) so a json.py in
+# the working directory can't stand in for the standard library's.
+claude_result() {
+    python3 -I -c '
+import json, re, sys
+d = json.load(open(sys.argv[1]))
+with open(sys.argv[2] + ".md.part", "w") as f:
+    f.write(d.get("result") or "")
+models = [re.sub(r"[^A-Za-z0-9._-]", "", m) for m, u in (d.get("modelUsage") or {}).items() if u.get("outputTokens")]
+print(",".join(models))
+print("blocked" if d.get("safety_stops") or d.get("stop_reason") == "refusal" else "")
+print("stop_reason: %s, safety_stops: %s" % (d.get("stop_reason"), d.get("safety_stops")), file=sys.stderr)
+' "$1" "$2"
 }
 
 run_claude() { # lens prompt
-    local dest="$out/claude/$1" start=$SECONDS rc=0
+    local dest="$out/claude/$1" json="$work/claude-$1.json" start=$SECONDS rc=0
+    local result notes=() info models="" blocked="" m
     local envs=(-u OPENAI_API_KEY -u CODEX_API_KEY -u SENTINEL_ANTHROPIC_API_KEY -u ANTHROPIC_API_KEY)
     [[ -z $claude_key ]] || envs+=("ANTHROPIC_API_KEY=$claude_key")
     (cd "$work/repo" && env "${envs[@]}" \
         timeout --kill-after=30 "$RUN_TIMEOUT" \
         claude -p --safe-mode --model "$MODEL" --effort "$EFFORT" \
             --setting-sources "" --tools "Read,Grep,Glob" \
-            --permission-mode dontAsk --no-session-persistence --output-format text \
-        < "$2" > "$dest.md.part" 2> "$dest.log") || rc=$?
-    finish "$dest" "$rc" || rc=$?
-    status claude "$1" "$rc" $((SECONDS - start))
+            --permission-mode dontAsk --no-session-persistence --output-format json \
+        < "$2" > "$json" 2> "$dest.log") || rc=$?
+    # The JSON names the models that wrote the reply and says whether a
+    # safeguard stopped it, which the text output leaves out. The JSON itself
+    # stays in the temp folder, so step 4 reads only the .md reports.
+    if [[ -s $json ]] && info=$(claude_result "$json" "$dest" 2>> "$dest.log"); then
+        { read -r models || true; read -r blocked || true; } <<< "$info"
+    else
+        cat "$json" >> "$dest.log"
+        [[ $rc -ne 0 ]] || rc=1
+    fi
+    notes+=("model ${models:-not reported}")
+    # SENTINEL_MODEL can be an alias (opus) or a full name with a suffix
+    # (claude-opus-5-5[1m]); the JSON has the full name with no suffix.
+    for m in ${models//,/ }; do
+        [[ $m == *"${MODEL%%\[*}"* ]] || { notes+=("MODEL DIFFERS (asked for $MODEL)"); break; }
+    done
+    finish "$dest" "$rc" "$blocked" || rc=1
+    status claude "$1" $((SECONDS - start)) "$result" "${notes[@]}"
     return "$rc"
 }
 
 run_codex() { # lens prompt
-    local dest="$out/codex/$1" start=$SECONDS rc=0
+    local dest="$out/codex/$1" start=$SECONDS rc=0 result notes=()
     # Codex's --sandbox read-only lets the model's commands read the whole disk
     # (home directory, keys), and it silently overrides any permission profile,
     # so it is not used. The "audit" profile makes only the system directories
@@ -202,8 +283,9 @@ run_codex() { # lens prompt
     [[ -z $codex_key ]] || envs+=("CODEX_API_KEY=$codex_key")
     env "${envs[@]}" timeout --kill-after=30 "$RUN_TIMEOUT" codex "${args[@]}" - \
         < "$2" > "$dest.log" 2>&1 || rc=$?
-    finish "$dest" "$rc" || rc=$?
-    status codex "$1" "$rc" $((SECONDS - start))
+    # Codex's output names no model, so only the format is checked.
+    finish "$dest" "$rc" || rc=1
+    status codex "$1" $((SECONDS - start)) "$result" "${notes[@]}"
     return "$rc"
 }
 

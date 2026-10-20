@@ -89,7 +89,7 @@ semgrep runs with `--metrics=off`. `semgrep.yml` also lists rules to skip: the t
 lenses.sh <repo-dir> <claude|codex|both>
 ```
 
-Each lens runs once on each provider you name. Claude runs three lenses at a time and Codex four, and with `both` Claude finishes before Codex starts. Results go to `<repo>/audit/lenses/<timestamp>/<provider>/<lens>.md`, each with a `.log`, plus `run.txt` recording the commit, models and settings. A run that fails leaves only its `.log`.
+Each lens runs once on each provider you name. Claude runs three lenses at a time and Codex four, and with `both` Claude finishes before Codex starts. Results go to `<repo>/audit/lenses/<timestamp>/<provider>/<lens>.md`, each with a `.log`, plus `run.txt` recording the commit, models, settings and each run's status. A run that fails, is stopped by a safeguard (`BLOCKED`), or doesn't read as a report (`UNPARSEABLE`: no `## Finding` block and no `## No findings` block listing what it examined) leaves only its `.log`, so a refusal never counts as a clean result. Claude runs record the model that answered and say `MODEL DIFFERS` when it isn't the one asked for. Codex's output doesn't name its model, so Codex runs get only the format check.
 
 Settings, set as environment variables:
 
