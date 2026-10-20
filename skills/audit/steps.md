@@ -73,15 +73,16 @@ Lens output is unverified, and its severities run high. Check it before the user
    - those the Claude Security report already has (name its finding),
    - those `THREAT-MODEL.md` already documents (quote the line),
    - those that need something `THREAT-MODEL.md` says is not an escalation, such as a same-user process that can already write the files.
-4. Send the rest to read-only subagents, grouped by area, a handful of findings each. Each one reads `THREAT-MODEL.md` first, traces its findings in the code at file:line without trusting the lens's line numbers or claims, and returns for each: CONFIRMED (the whole path traced, every step at file:line), PARTLY (what holds and what doesn't), or NOT CONFIRMED (why); whether `THREAT-MODEL.md` documents it; the severity under the threat model's own rules; and the preconditions. Tell them to read only and to write no files.
+4. Send the rest to read-only subagents, grouped by area, a handful of claims each. Give each subagent only neutral claims: for each, the location, the trigger and the claimed consequence, in your own words. Never say which provider or lens reported it, what severity the lens gave it, or what any other subagent concluded. Tell each one to read `THREAT-MODEL.md` first, then try to prove each claim wrong: find the check that stops it, the precondition that cannot hold, or the line of `THREAT-MODEL.md` that rules it out, without trusting the claim's line numbers. It returns for each: REFUTED (what stops it, at file:line), PARTLY (what holds and what is refuted, each at file:line), or STANDS (it could not be refuted, with the whole path traced, every step at file:line); whether `THREAT-MODEL.md` documents it; the severity under the threat model's own rules; and the preconditions. Tell them to read only and to write no files. The subagents are Claude, so a finding from a Claude lens is checked by the same model family; say so in `audit/lenses.md`.
 5. Write `audit/lenses.md`:
    - the ALERT line, if there is one, then the unread files by kind;
    - every run in `run.txt` that is not `ok` or says `MODEL DIFFERS`, so the pass can't look complete when it isn't. A lens with no `ok` run on any provider was not covered;
-   - the confirmed and partly confirmed findings by severity, each with its path, the provider and lens that found it, and its preconditions. A finding `run.txt` says is missing a field is checked like the rest, with the missing fields named next to it;
+   - the findings that stand or partly stand, by the severity the check gave them, each with its path, the provider and lens that found it, and its preconditions. For a finding that partly stands, say what was refuted; A finding `run.txt` says is missing a field is checked like the rest, with the missing fields named next to it;
+   - the refuted findings, each with what stops it at file:line;
    - the set-aside list with reasons;
    - any line of `THREAT-MODEL.md` the check found to be wrong.
 
-Show the user the confirmed findings by severity.
+Show the user the findings that stand or partly stand, by severity.
 
 ## 5. Findings log
 

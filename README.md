@@ -31,7 +31,7 @@ What `/snt:audit` runs, in order:
 1. **Mechanical checks.** `.sentinel/mechanical/check.sh .`, with each fuzz target run for 60 seconds and the output saved to `audit/check.txt`.
 2. **Claude Security scan.** `/claude-security`, a release, branch or quick scan, picked when the step starts. Its report is copied to `audit/claude-security.md`. After a whole-repository scan, any production file the scan did not cover is flagged with an ALERT, and a scoped scan of those files is offered. Its suggest-patches job is never run.
 3. **Lens pass.** Eight review prompts, one concern each, run once each on Claude, on Codex, on both, or skipped. You choose each time, and the question states the cost. `.sentinel/lenses.sh` runs them.
-4. **Check.** Read-only subagents trace every lens finding the Claude Security report and `THREAT-MODEL.md` don't already cover, and only the confirmed ones reach `audit/lenses.md`.
+4. **Check.** Every lens finding the Claude Security report and `THREAT-MODEL.md` don't already cover goes to read-only subagents as a neutral claim, with no word of which model or lens found it or what severity it was given. Each subagent tries to prove its claims wrong, and only the ones that stand, traced at file:line, reach `audit/lenses.md` with the severity the check gave them. The subagents are Claude, so a Claude lens's findings are checked by the same model family.
 5. **Findings log.** One row per step in `audit/findings-log.md`.
 
 Everything the audit writes goes under `audit/`, apart from Claude Security's own `CLAUDE-SECURITY-<timestamp>/` folder. `/snt:onboard` puts both in `.gitignore`, because they hold unfixed vulnerability findings.

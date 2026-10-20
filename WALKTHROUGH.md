@@ -65,7 +65,7 @@ It stops after each step.
 | 1. Mechanical checks | `check.sh`: cargo audit, cargo deny, clippy and semgrep as gates; geiger, vet, fuzz build, a run of each fuzz target (60 seconds each, or `SENTINEL_FUZZ_SECONDS`), Miri, gitleaks over the whole git history, shellcheck, zizmor, npm audit, pip-audit and bandit as reports. Its output is saved to `audit/check.txt`. | Failures by tool, and the path of any fuzz artifact. Nothing gets fixed in this session. |
 | 2. Claude Security scan | `/claude-security`, a release, branch or quick scan, picked when the step starts; its report is copied to `audit/claude-security.md` | The findings by severity, any ALERT line about production files the scan did not cover, and, after a release scan, whether it looked at every trust boundary `THREAT-MODEL.md` names. Rerun it with `--scope` on any it missed. |
 | 3. Lens pass | Asks Claude, Codex, both or skip, with the cost, then runs `.sentinel/lenses.sh` | Your choice. Nothing runs until you make it. |
-| 4. Check | Read-only subagents trace each lens finding that is new, and write the confirmed ones to `audit/lenses.md` | The confirmed findings by severity, and the list of what was set aside and why. |
+| 4. Check | Read-only subagents try to refute each new lens finding, given as a neutral claim with no provider, lens or severity, and the ones that stand go to `audit/lenses.md` | The findings that stand, by severity, what was refuted, and what was set aside and why. |
 | 5. Findings log | One row per step in `audit/findings-log.md`: the tools that failed, and the findings by severity for Claude Security and the lenses | The notes column is yours to fill in. |
 
 Where everything lands:
