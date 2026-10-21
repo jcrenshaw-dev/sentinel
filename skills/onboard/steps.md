@@ -29,7 +29,7 @@ Skip this step if the repo has no `Cargo.toml`.
 
 - Add cargo-fuzz targets for every function that parses external input: JSONL, config, CLI arguments, MCP payloads. Put each `fuzz/` directory in the crate that owns the function: the repo root for a single package, the member crate's directory in a workspace (a virtual workspace root cannot hold one).
 - Each target must compile: run `cargo +nightly fuzz build` in each crate that has a `fuzz/` directory, and show the result. Check that the main workspace still builds afterwards.
-- Report whether the repo's own code has any `unsafe`. You do not need to add anything for it: check.sh runs Miri on the unit tests (`cargo +nightly miri test --workspace --lib --bins`) by itself when the repo has unsafe code.
+- Report whether the repo's own code has any `unsafe`. You do not need to add anything for it: check.sh runs Miri on the unit tests (`cargo +nightly miri nextest run --workspace --lib --bins`) by itself when the repo has unsafe code.
 
 ## 5. deny.toml (Rust only)
 

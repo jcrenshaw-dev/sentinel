@@ -1,0 +1,8 @@
+# nextest settings check.sh gives Miri runs, through --tool-config-file. A
+# repo's own .config/nextest.toml overrides them.
+[profile.default-miri]
+# Under Miri a test runs far slower than natively: Terminus's test that loops
+# over every Unicode code point ran for more than 18 minutes without finishing.
+# Stop each test after 5 minutes so one can't hold up the audit; nextest
+# reports it as TIMEOUT.
+slow-timeout = { period = "60s", terminate-after = 5 }

@@ -23,7 +23,7 @@ rustup component add clippy --toolchain stable
 rustup toolchain install nightly --profile minimal
 rustup component add miri --toolchain nightly
 
-cargo install --locked cargo-audit cargo-deny cargo-geiger cargo-vet cargo-fuzz
+cargo install --locked cargo-audit cargo-deny cargo-geiger cargo-vet cargo-fuzz cargo-nextest
 
 for pkg in semgrep pip-audit bandit zizmor; do
     if pipx list --short 2>/dev/null | grep -q "^$pkg "; then

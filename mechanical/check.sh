@@ -10,8 +10,8 @@
 #   repo's .semgrep/ folder, and their tests)
 # Reported only (output shown, exit code ignored):
 #   cargo geiger, cargo vet, cargo fuzz build, cargo fuzz run (only when
-#   SENTINEL_FUZZ_SECONDS is set), cargo miri test (only when the repo has
-#   unsafe code and nightly has Miri), gitleaks, shellcheck, zizmor,
+#   SENTINEL_FUZZ_SECONDS is set), cargo miri nextest run (only when the
+#   repo has unsafe code and nightly has Miri), gitleaks, shellcheck, zizmor,
 #   npm audit, pip-audit, bandit
 set -uo pipefail
 
@@ -191,19 +191,28 @@ if [[ -f Cargo.toml ]]; then
     fi
 
     # Miri checks unsafe code for undefined behavior, so it runs only when the
-    # repo's own Rust code has an unsafe block, fn, impl, trait or extern.
+    # repo's own Rust code has an unsafe block, fn, impl, trait or extern. Miri
+    # stops a test process at the first thing it cannot run, such as a call
+    # into C (SQLite) or starting a process, so nextest runs each test in its
+    # own Miri process: such a test stops only itself, though a data race
+    # between two tests goes unseen. With isolation off, tests can use temp
+    # directories, the clock and the environment. miri-nextest.toml stops any
+    # test after 5 minutes.
     if grep -rqE --include='*.rs' --exclude-dir=target --exclude-dir=.git \
         --exclude-dir=vendor --exclude-dir=third_party \
         'unsafe[[:space:]]*(\{|fn|impl|trait|extern)' .; then
         # rustup puts a cargo-miri proxy on PATH for every toolchain, so ask
         # nightly itself whether Miri is installed (CI runners leave it out).
         if rustup +nightly component list --installed 2>/dev/null | grep -q '^miri'; then
-            step report "cargo miri test" "$(cargo_sub miri)" cargo +nightly miri test --workspace --lib --bins
+            step report "cargo miri nextest run" "$(cargo_sub nextest)" \
+                env MIRIFLAGS="${MIRIFLAGS:+$MIRIFLAGS }-Zmiri-disable-isolation" \
+                cargo +nightly miri nextest run --workspace --lib --bins --no-fail-fast \
+                --tool-config-file "sentinel:$mech/miri-nextest.toml"
         else
-            skip "cargo miri test" "Miri is not installed for nightly; rustup +nightly component add miri rust-src"
+            skip "cargo miri nextest run" "Miri is not installed for nightly; rustup +nightly component add miri rust-src"
         fi
     else
-        skip "cargo miri test" "no unsafe code in the repo's own Rust files"
+        skip "cargo miri nextest run" "no unsafe code in the repo's own Rust files"
     fi
 else
     skip "cargo checks" "no Cargo.toml"
