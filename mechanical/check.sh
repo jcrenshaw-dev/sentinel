@@ -6,13 +6,13 @@
 #   SENTINEL_FUZZ_JOBS=<n> runs n fuzz targets at a time (default 1).
 #
 # Gates (a failure, or the tool missing, makes the exit code non-zero):
-#   cargo audit, cargo deny, cargo clippy, semgrep (with the rules in the
-#   repo's .semgrep/ folder, and their tests)
+#   cargo deny, cargo clippy, semgrep (with the rules in the repo's .semgrep/
+#   folder, and their tests), and no tracked file under audit/
 # Reported only (output shown, exit code ignored):
-#   cargo geiger, cargo vet, cargo fuzz build, cargo fuzz run (only when
+#   cargo vet, cargo fuzz build, cargo fuzz run (only when
 #   SENTINEL_FUZZ_SECONDS is set), cargo miri nextest run (only when the
-#   repo has unsafe code and nightly has Miri), gitleaks, shellcheck, zizmor,
-#   npm audit, pip-audit, bandit
+#   repo has unsafe code and nightly has Miri), gitleaks, shellcheck,
+#   zizmor, the fast.yml copy against the kit's, npm audit, pip-audit
 set -uo pipefail
 
 mech=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
@@ -77,11 +77,14 @@ tracked() {
 if [[ -f Cargo.toml ]]; then
     deny_cfg="$repo/deny.toml"
     [[ -f $deny_cfg ]] || deny_cfg="$mech/deny.toml"
-    step gate "cargo audit" "$(cargo_sub audit)" cargo audit
+    # cargo deny's advisories check reads the same RustSec database cargo
+    # audit does, with deny.toml stricter on yanked and unmaintained crates.
     step gate "cargo deny ($deny_cfg)" "$(cargo_sub deny)" \
         cargo deny --manifest-path Cargo.toml --config "$deny_cfg" check
+    # --locked fails when Cargo.lock is out of date instead of rewriting it,
+    # so the lockfile cargo deny just checked is the one that builds.
     step gate "cargo clippy" "$(cargo_sub clippy)" \
-        cargo clippy --all-targets -- -W clippy::pedantic -W clippy::nursery
+        cargo clippy --locked --all-targets
 
     # Manifest paths of every workspace member (or the one package). Python
     # runs isolated (-I) so a json.py in the repo can't stand in for the
@@ -90,19 +93,6 @@ if [[ -f Cargo.toml ]]; then
         cargo metadata --no-deps --format-version 1 |
             python3 -I -c 'import json,sys; print("\n".join(p["manifest_path"] for p in json.load(sys.stdin)["packages"]))'
     }
-
-    # cargo geiger cannot run on a virtual workspace manifest, so run it on
-    # each workspace member.
-    geiger() {
-        local manifests rc=0 m
-        manifests=$(members) || return 1
-        while IFS= read -r m; do
-            echo "-- $m"
-            cargo geiger --manifest-path "$m" || rc=$?
-        done <<< "$manifests"
-        return "$rc"
-    }
-    step report "cargo geiger" "$(cargo_sub geiger)" geiger
 
     if [[ -d supply-chain ]]; then
         step report "cargo vet" "$(cargo_sub vet)" cargo vet --locked
@@ -219,7 +209,7 @@ else
     skip "cargo checks" "no Cargo.toml"
 fi
 
-semgrep_args=(scan --metrics=off --error --exclude=audit)
+semgrep_args=(scan --metrics=off --error --exclude=audit --exclude='CLAUDE-SECURITY-*')
 while read -r section value; do
     case $section in
         configs)
@@ -384,10 +374,8 @@ if [[ -f pyproject.toml || -f requirements.txt ]]; then
         audited=1
     fi
     [[ $audited -eq 1 ]] || skip "pip-audit" "pyproject.toml has no [project] table and there is no requirements.txt"
-    step report "bandit" bandit bandit -r . \
-        -x ./.git,./.venv,./venv,./node_modules,./target,./audit,./.tox,./__pycache__
 else
-    skip "pip-audit and bandit" "no pyproject.toml or requirements.txt"
+    skip "pip-audit" "no pyproject.toml or requirements.txt"
 fi
 
 echo

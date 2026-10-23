@@ -4,8 +4,8 @@
 # for a workstation.
 #
 # Usage: install-tools.sh
-#   The gating tools: cargo-audit, cargo-deny and clippy when the repo has a
-#   Cargo.toml, and semgrep. Also gitleaks, shellcheck and zizmor, which
+#   The gating tools: cargo-deny and clippy when the repo has a Cargo.toml,
+#   and semgrep. Also gitleaks, shellcheck and zizmor, which
 #   check.sh only reports.
 #
 # Works as root without sudo (Forgejo runner images) and as a normal user with
@@ -63,9 +63,9 @@ if [[ -f Cargo.toml ]]; then
     done
     [[ -z $pinned ]] || rustup toolchain install "$pinned" --profile minimal --component clippy
     # Pinned so a new release can't change what the gates check. Bump the
-    # versions here, from crates.io. A change to the RustSec database's format
-    # can need a newer cargo-audit.
-    cargo install --locked cargo-audit@0.22.2 cargo-deny@0.20.2
+    # version here, from crates.io. A change to the RustSec database's format
+    # can need a newer cargo-deny.
+    cargo install --locked cargo-deny@0.20.2
 fi
 
 # Pinned like the cargo tools; bump the version here, from PyPI.

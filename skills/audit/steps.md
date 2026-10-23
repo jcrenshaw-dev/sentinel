@@ -2,7 +2,7 @@
 
 Run the security audit on this repository. Work through the steps below in order. After each step, stop, show the user the result, and wait for them to say continue.
 
-This session only finds and records. Do not fix code, do not write tests, and do not commit anything. Step 1 runs the project's code: clippy, cargo geiger and the fuzz build compile it, which runs its build scripts and proc macros and those of its dependencies, the fuzz run runs its fuzz targets, and Miri runs its unit tests. The Claude Security scan, the lenses and the check of their findings only read it. What happens to the findings afterwards is the user's decision.
+This session only finds and records. Do not fix code, do not write tests, and do not commit anything. Step 1 runs the project's code: clippy and the fuzz build compile it, which runs its build scripts and proc macros and those of its dependencies, the fuzz run runs its fuzz targets, and Miri runs its unit tests. The Claude Security scan, the lenses and the check of their findings only read it. What happens to the findings afterwards is the user's decision.
 
 ## Before you start
 

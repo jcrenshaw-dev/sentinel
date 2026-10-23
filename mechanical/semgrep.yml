@@ -8,6 +8,8 @@ configs:
   - p/secrets
   - p/javascript
   - p/python
+  # The bandit rules, as semgrep ships them, so bandit itself need not run.
+  - p/bandit
 
 # Rules that fire on every command-line tool, which is what this kit audits:
 # reading the program's arguments or its own path is how a CLI works.
