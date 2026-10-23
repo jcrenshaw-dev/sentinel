@@ -2,6 +2,7 @@
 # Run every lens once against a repo, on Claude, Codex or both.
 #
 # Usage: lenses.sh <repo-dir> <claude|codex|both>
+#   SENTINEL_LENSES=<name>,<name> runs only those lenses.
 #
 # Writes <repo-dir>/audit/lenses/<timestamp>/<provider>/<lens>.md, a <lens>.log
 # next to each, run.txt describing the run and listing each run's status, and
@@ -28,7 +29,21 @@ git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || die "$repo is not a git re
 check_tools
 guard_codex
 
-lenses=("$sentinel"/lenses/*.md)
+# SENTINEL_LENSES names a subset, comma separated, to rerun a lens whose run
+# failed or was refused without paying for all eight.
+lenses=()
+if [[ -n ${SENTINEL_LENSES:-} ]]; then
+    IFS=, read -r -a chosen <<< "$SENTINEL_LENSES"
+    for lens in "${chosen[@]}"; do
+        lens=${lens// /}
+        [[ -n $lens ]] || continue
+        [[ -f $sentinel/lenses/$lens.md ]] || die "no lens named $lens in $sentinel/lenses"
+        lenses+=("$sentinel/lenses/$lens.md")
+    done
+    [[ ${#lenses[@]} -gt 0 ]] || die "SENTINEL_LENSES names no lens"
+else
+    lenses=("$sentinel"/lenses/*.md)
+fi
 ts=$(date -u +%Y%m%dT%H%M%SZ)
 make_out "$repo/audit/lenses/$ts"
 make_snapshot
