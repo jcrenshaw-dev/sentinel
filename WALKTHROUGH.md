@@ -66,7 +66,7 @@ It stops after each step.
 | 1. Mechanical checks | `check.sh`: cargo audit, cargo deny, clippy and semgrep as gates; geiger, vet, fuzz build, a run of each fuzz target (it asks first: 60 seconds each one at a time, 30 minutes each as many at once as the machine allows, or none), Miri, gitleaks over the whole git history, shellcheck, zizmor, npm audit, pip-audit and bandit as reports. Its output is saved to `audit/check.txt`. | Failures by tool, and the path of any fuzz artifact. Nothing gets fixed in this session. |
 | 2. Claude Security scan | `/claude-security`, a release, branch or quick scan, picked when the step starts; its report is copied to `audit/claude-security.md` | The findings by severity, any ALERT line about production files the scan did not cover, and, after a release scan, whether it looked at every trust boundary `THREAT-MODEL.md` names. Rerun it with `--scope` on any it missed. |
 | 3. Lens pass | Asks Claude, Codex, both or skip, with the cost, then runs `.sentinel/lenses.sh` | Your choice. Nothing runs until you make it. |
-| 4. Check | Read-only subagents try to refute each new lens finding, given as a neutral claim with no provider, lens or severity, and the ones that stand go to `audit/lenses.md` | The findings that stand, by severity, what was refuted, and what was set aside and why. |
+| 4. Check | Each new lens finding, and each Claude Security finding, goes as a neutral claim with no provider, lens or severity to the other model family, Claude's to Codex and Codex's to Claude, through `.sentinel/refute.sh` in the lenses' sandbox; the ones that stand go to `audit/lenses.md` | Your choice to cross-check or use Claude for all. Then the findings that stand, by severity, what was refuted and by which family, what went unchecked, and what was set aside and why. |
 | 5. Findings register and log | Each finding gets its stable ID in `audit/findings.md`, new or matched to a known one, and open findings this audit didn't report get a note. One row per step in `audit/findings-log.md`: the tools that failed, and the findings by severity for Claude Security and the lenses, with counts of new, known and unreported. Then `SENTINEL.md` at the repo root: what ran, how it went, and the open findings as counts | Only you set a finding's status to `fixed` or `accepted`. The notes columns are yours to fill in. Read `SENTINEL.md` and commit it. |
 
 Where everything lands:
@@ -78,6 +78,7 @@ Where everything lands:
 | `audit/claude-security-skipped.md` | The scoped scan of files the main scan did not cover, if it ran |
 | `CLAUDE-SECURITY-<timestamp>/` | Claude Security's own run folder |
 | `audit/lenses/<timestamp>/` | Each lens's raw output and log, per provider |
+| `audit/claims/`, `audit/refute/<timestamp>/` | The claims the check sent, and each run's verdicts and log, per provider |
 | `audit/lenses.md` | The checked lens findings |
 | `audit/findings.md` | Every finding under its stable ID, with when it was first and last seen and its status |
 | `audit/findings-log.md` | The running log for this repo |

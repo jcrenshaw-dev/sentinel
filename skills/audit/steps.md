@@ -84,22 +84,37 @@ Lens output is unverified, and its severities run high. Check it before the user
    - those `THREAT-MODEL.md` already documents (quote the line),
    - those that need something `THREAT-MODEL.md` says is not an escalation, such as a same-user process that can already write the files,
    - those that are the same defect as a row in `audit/findings.md` with status `accepted`, judged as in step 5 (give its ID and the user's reason). Step 5 still updates that row's last seen. Report them only as a count, such as "3 accepted findings came back".
-4. Send the rest to read-only subagents, grouped by area, a handful of claims each. Give each subagent only neutral claims: for each, the location, the trigger and the claimed consequence, in your own words. Never say which provider or lens reported it, what severity the lens gave it, or what any other subagent concluded. Tell each one to read `THREAT-MODEL.md` first, then try to prove each claim wrong: find the check that stops it, the precondition that cannot hold, or the line of `THREAT-MODEL.md` that rules it out, without trusting the claim's line numbers. It returns for each: REFUTED (what stops it, at file:line), PARTLY (what holds and what is refuted, each at file:line), or STANDS (it could not be refuted, with the whole path traced, every step at file:line); whether `THREAT-MODEL.md` documents it; the severity under the threat model's own rules; and the preconditions. Tell them to read only and to write no files. The subagents are Claude, so a finding from a Claude lens is checked by the same model family; say so in `audit/lenses.md`.
-5. Write `audit/lenses.md`:
+4. Write the rest as claims files, for `.sentinel/refute.sh` to send to the other model family. Add every Claude Security finding from this audit as claims too: its own verifiers are Claude, and this is its one look from outside. Make groups by area, a handful of claims each, and keep the two families apart: a group holds either findings Codex reported, including any Claude reported as well, or findings only Claude reported (a Claude lens or Claude Security). Write each group to `audit/claims/<area>.md`, with a number after the area when it has more than one group, and no word of the family in the name. In each file, number the claims from 1 and write each one in your own words:
+
+   ```
+   ## Claim 1
+   - location: <path:line>
+   - trigger: <the input or sequence that makes it happen>
+   - consequence: <what the attacker or the bug gets>
+   ```
+
+   Never put in a claim which provider or lens reported it, what severity it was given, or what any other check concluded.
+5. Ask the user in one AskUserQuestion how to check, unless `codex` is not on PATH: then everything goes to Claude, and you say so.
+   - **Cross-check (Recommended):** the groups Codex reported go to Claude, the groups only Claude reported go to Codex, so every finding is checked by a different model family than found it. Codex is billed to the key or the Codex login, Claude to the key or the plan, as in step 3.
+   - **Claude only:** every group goes to Claude. `audit/lenses.md` and `SENTINEL.md` then say the findings were checked by the same family that found them.
+6. Run `.sentinel/refute.sh . codex audit/claims/<file>...` for the groups that go to Codex and `.sentinel/refute.sh . claude audit/claims/<file>...` for the groups that go to Claude, and wait for each. Each run reads `THREAT-MODEL.md` first, then tries to prove each claim wrong in the same sandbox the lenses run in, and answers for each: REFUTED (what stops it, at file:line), PARTLY (what holds and what is refuted, each at file:line) or STANDS (it could not be refuted, the whole path traced, every step at file:line); whether `THREAT-MODEL.md` documents it; the severity under the threat model's own rules; and the preconditions. It prints where the verdicts went, `audit/refute/<timestamp>/`, and a line for each run, also kept in its `run.txt`, in the same shape as the lens runs: `ok`, `FAILED`, `BLOCKED` or `UNPARSEABLE`, with `MODEL DIFFERS` and `SAFETY STOP` notes for Claude. An `ok` line can also say `claim N is missing` or `has no verdict`. A claim in a run that is not `ok`, or named in such a note, is unchecked: show the end of the `.log` and ask before running that file again. Never rerun on your own.
+7. Write `audit/lenses.md`:
    - the ALERT line, if there is one, then one line of what the lenses read, such as "The lenses read 48 of 435 files in full and 31 in part; the full lists are in `coverage.txt`." Don't list the files the lenses alone did not read;
-   - every run in `run.txt` that is not `ok`, says `MODEL DIFFERS`, or says `SAFETY STOP during the run`, so the pass can't look complete when it isn't. A safety stop means part of that lens's work may be missing from its report. A lens with no `ok` run on any provider was not covered;
-   - the findings that stand or partly stand, by the severity the check gave them, each with its path, the provider and lens that found it, and its preconditions. For a finding that partly stands, say what was refuted; A finding `run.txt` says is missing a field is checked like the rest, with the missing fields named next to it;
-   - the refuted findings, each with what stops it at file:line;
+   - one line saying who checked: "Checked by Codex for the findings Claude reported and by Claude for the findings Codex reported" or "Checked by Claude for every finding, the same family that reported them";
+   - every lens run in `run.txt` that is not `ok`, says `MODEL DIFFERS`, or says `SAFETY STOP during the run`, so the pass can't look complete when it isn't. A safety stop means part of that lens's work may be missing from its report. A lens with no `ok` run on any provider was not covered;
+   - the findings that stand or partly stand, by the severity the check gave them, each with its path, the provider and lens that found it, the family that checked it, and its preconditions. For a finding that partly stands, say what was refuted. A finding `run.txt` says is missing a field is checked like the rest, with the missing fields named next to it;
+   - the refuted findings, each with what stops it at file:line and the family that refuted it;
+   - the unchecked findings, with the run or note that left them unchecked;
    - the set-aside list with reasons;
    - any line of `THREAT-MODEL.md` the check found to be wrong.
 
-Show the user the findings that stand or partly stand, by severity.
+Show the user the findings that stand or partly stand, by severity, and the unchecked ones.
 
 ## 5. Findings register and log
 
 Every finding gets an ID that stays the same from audit to audit, kept in `audit/findings.md`. If the file does not exist, start it from `.sentinel/findings-register.md`.
 
-1. Take every Claude Security finding from this audit, including the skipped-files scan, every lens finding that stands or partly stands after step 4, and every lens finding step 4 set aside as accepted. For each, decide whether it is the same defect as a row in the register: the same flaw in the same code, judged by reading the code at both locations, not by matching line numbers or titles. A finding that matches keeps that row's ID: set last seen to today, update its severity and location, and add this step to found by. A finding that matches nothing gets the next unused ID, `<repo>-NNN`, numbered after the highest in the file, with today as first and last seen and status `open`.
+1. Take every Claude Security finding from this audit, including the skipped-files scan, every lens finding that stands or partly stands after step 4, every lens finding step 4 left unchecked, and every lens finding step 4 set aside as accepted. For each, decide whether it is the same defect as a row in the register: the same flaw in the same code, judged by reading the code at both locations, not by matching line numbers or titles. A finding that matches keeps that row's ID: set last seen to today, update its severity and location, and add this step to found by. A finding that matches nothing gets the next unused ID, `<repo>-NNN`, numbered after the highest in the file, with today as first and last seen and status `open`. A Claude Security finding keeps Claude Security's severity, and its step 4 verdict goes in its notes, such as `check: REFUTED by codex, <what stops it>`; an unchecked finding gets `unchecked <today>`.
 2. For every `open` row this audit did not report, add `not reported <today>` to its notes. If `git log` shows commits touching its file since it was last seen, add `check whether fixed`. Never set a status yourself: `fixed` and `accepted` are the user's.
 3. Put each finding's ID next to it in `audit/lenses.md`, and use the IDs whenever you show the user findings from now on.
 
