@@ -24,7 +24,7 @@ claude plugin install security-guidance@claude-plugins-official
 
 **Keys.** The audit runs on your claude.ai login, so it needs no key on your machine. Keep the Anthropic API key in your password manager. Its only job is the GitHub secret for the pull request review (onboarding step 6). It must be scoped to a workspace: an unscoped key fails with a 400 asking for an `anthropic-workspace-id` header. Never export `ANTHROPIC_API_KEY` in your shell: every interactive Claude Code session would see it next to your claude.ai login.
 
-**CLIs.** `claude` on PATH. For a lens pass on Codex, `codex` on PATH too, with `OPENAI_API_KEY` set or a Codex login.
+**CLIs.** `claude` on PATH, and `gh` for the secret, variable and settings checks in onboarding and for reading an encrypted review, which needs `age` too. For a lens pass or a cross-check on Codex, `codex` on PATH, with `OPENAI_API_KEY` set or a Codex login.
 
 ## 2. Onboard a project (once per repo)
 
@@ -92,13 +92,13 @@ On a public repo, keep findings to yourself until they're fixed: no issue, no co
 
 | When | What to do |
 |------|------------|
-| Every pull request, and every push to `main` | `fast.yml` runs by itself: the mechanical checks, and on a pull request Claude Opus 5.5 reviewing the diff alongside them and posting the result as a comment. On a public repo with the age variable set, the comment holds only the count of findings; read the review with `.sentinel/ci/read-review.sh <pull request number>`. The check fails if the review didn't actually run. The review runs only on pull requests; a push straight to `main` gets the mechanical checks alone. |
+| Every pull request, and every push to `main` | `fast.yml` runs by itself: the mechanical checks, and on a pull request from the repo itself Claude Opus 5.5 reviewing the diff alongside them and posting the result as one comment, rewritten on each push. On a public repo with the age variable set, the comment holds only the count of findings; read the review with `.sentinel/ci/read-review.sh <pull request number>`. The check fails if the review didn't actually run. The review runs only on pull requests; a push straight to `main` gets the mechanical checks alone. |
 | Before a release | `/snt:audit`, commit `SENTINEL.md`, then decide what to do with what it finds. |
 | In a repo onboarded before the kit had the release gate | Add the `audited` job from the kit's README to the release workflow. A release from a commit the last audit did not cover fails, and so does one with no `SENTINEL.md`. |
 | Every Monday | `fast.yml` runs the mechanical checks on `main` by itself, so a new advisory shows up without a pull request. |
 | When the tool gains a new input, output, command or hook | Update `THREAT-MODEL.md` and `.claude/claude-security-guidance.md` first, then audit. The pull request review and your check of the Claude Security report both work from the threat model. |
 | When sentinel changes | Move the project's pin and commit it: `git submodule update --remote .sentinel`. With the `gitsubmodule` entry in `.github/dependabot.yml`, Dependabot opens that pull request for you. check.sh reports when your `fast.yml` copy differs from the kit's; copy it again when the kit's changed. |
 | When the snt plugin changes | `claude plugin marketplace update sentinel && claude plugin update snt@sentinel`, then restart Claude Code |
-| Now and then | Rerun `mechanical/install.sh` to update the tools. |
+| Now and then | Rerun `mechanical/install.sh` to update the tools. In the kit, bump the pins by hand: the action SHAs and the Claude Code version in `ci/fast.yml`, the tool versions and hashes in `ci/install-tools.sh`. check.sh's fast.yml report shows when Dependabot has moved your copy's pins past the kit's. |
 
 There is no scheduled audit in CI. The full audit runs only on your machine, with `/snt:audit`.

@@ -1,6 +1,6 @@
 ---
 name: audit
-description: Run the sentinel security audit on the current repository - the mechanical checks, a /claude-security scan, an optional lens pass on Claude or Codex, a read-only check of its findings, and the findings log - stopping after each step. Finds and records only; it fixes nothing and writes no tests. Run only on an explicit /snt:audit.
+description: Run the sentinel security audit on the current repository - the mechanical checks, a /claude-security scan, an optional lens pass on Claude or Codex, a check of every finding by the other model family, the findings register and log, and SENTINEL.md, the record of the audit - stopping after each step. Finds and records only; it fixes nothing, writes no tests and commits nothing. Run only on an explicit /snt:audit.
 disable-model-invocation: true
 ---
 

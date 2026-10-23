@@ -1,7 +1,7 @@
 {
   "name": "snt",
-  "version": "0.4.0",
-  "description": "Runs the sentinel security audit: /snt:onboard sets a repo up for it once, /snt:audit runs the mechanical checks, a Claude Security scan and an optional lens pass, and records what they find.",
+  "version": "0.5.0",
+  "description": "Runs the sentinel security audit: /snt:onboard sets a repo up for it once and checks its GitHub settings; /snt:audit runs the mechanical checks, a Claude Security scan, an optional lens pass and a check of every finding by the other model family, records what they find, and writes SENTINEL.md, the record of the audit.",
   "author": {
     "name": "John Crenshaw"
   },

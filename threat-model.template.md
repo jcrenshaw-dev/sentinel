@@ -1,6 +1,6 @@
 # Threat model: <tool name>
 
-Copy this file to the root of the repo under audit as `THREAT-MODEL.md` and fill in every section. The pull request review reads it first and treats it as the definition of what matters, and `/snt:onboard` builds the security-guidance rules from it, so a section left vague makes both vague. Answer with paths, commands, users and data types, not adjectives. If a section does not apply, say so and say why.
+Copy this file to the root of the repo under audit as `THREAT-MODEL.md` and fill in every section. The pull request review, the lenses and the check of their findings read it first and treat it as the definition of what matters, and `/snt:onboard` builds the security-guidance rules from it, so a section left vague makes all of them vague. Answer with paths, commands, users and data types, not adjectives. If a section does not apply, say so and say why.
 
 Version or commit this describes:
 Last reviewed:

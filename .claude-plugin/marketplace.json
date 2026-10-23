@@ -8,7 +8,7 @@
     {
       "name": "snt",
       "source": "./",
-      "description": "Runs the sentinel security audit: /snt:onboard sets a repo up for it once, /snt:audit runs the mechanical checks and a Claude Security scan and records what they find."
+      "description": "Runs the sentinel security audit: /snt:onboard sets a repo up for it once, /snt:audit runs the mechanical checks, a Claude Security scan, an optional lens pass and a cross-model check, and writes SENTINEL.md, the record of the audit."
     }
   ]
 }

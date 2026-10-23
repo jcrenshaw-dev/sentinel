@@ -1,6 +1,6 @@
 # sentinel
 
-sentinel is plain files and bash, with a few Python one-liners that use only the standard library, packaged as a Claude Code plugin so the whole pipeline runs from one command. It is tuned for Rust command-line tools, hooks and MCP servers that work with Claude Code transcripts, and it also covers Node and Python projects.
+sentinel is plain files and bash, with Python that uses only the standard library, packaged as a Claude Code plugin so the whole pipeline runs from one command. It is tuned for Rust command-line tools, hooks and MCP servers that work with Claude Code transcripts, and it also covers Node and Python projects.
 
 ## Status
 
@@ -18,7 +18,7 @@ claude plugin install snt@sentinel
 Then, in a project:
 
 - `/snt:onboard` sets the repo up, once. It adds the kit as a git submodule at `.sentinel`, writes `THREAT-MODEL.md` from the code, the security-guidance rules, fuzz targets and `deny.toml` for Rust, the fast CI workflow and `SECURITY.md`. On GitHub it then checks the repository's settings, who can open pull requests, the rulesets on `main` and on tags, secret scanning, Dependabot, and gives you the command for each one that is missing; and it adds the release gate to the release workflow. It stops after each step for you to look, and it does not run the audit.
-- `/snt:audit` runs the audit below, stopping after each step. It finds and records; it does not fix, write tests or commit anything.
+- `/snt:audit` runs the audit below, stopping after each step. It finds and records, and writes `SENTINEL.md` for you to commit; it does not fix, write tests or commit anything.
 
 Each project runs the sentinel version its `.sentinel` submodule is pinned to. Updating a step or a script happens once here, and a project picks it up by moving its pin.
 
@@ -69,14 +69,14 @@ Give the jobs that build or publish `needs: audited`. It cannot tell a productio
 | Path | What it is |
 |------|------------|
 | `.claude-plugin/`, `skills/` | The `snt` plugin: the `onboard` and `audit` skills, and the marketplace entry that installs them. |
-| `threat-model.template.md` | The template for a project's `THREAT-MODEL.md`. The pull request review reads it first, and `/snt:onboard` copies its key points into the security-guidance rules. |
+| `threat-model.template.md` | The template for a project's `THREAT-MODEL.md`. The pull request review, the lenses and the check read it first, and `/snt:onboard` copies its key points into the security-guidance rules. |
 | `lenses/*.md` | Eight review prompts, one concern each: data exposure, path handling, untrusted input, permissions, resource limits, hook execution, supply chain, crypto and state. |
 | `lenses.sh` | Runs every lens once through `claude -p`, `codex exec` or both. |
 | `refute.sh`, `refute.md` | Sends files of neutral claims to Claude or Codex, in the lenses' sandbox, to be proved wrong; `refute.md` is the instructions and the verdict format. Step 4 of the audit runs it. |
 | `reviewers.sh` | The snapshot, the two sandboxes and the two reviewers, shared by `lenses.sh` and `refute.sh`. Sourced, not run. |
-| `lens-events.py` | Reads the lens runs' JSON events for `lenses.sh`: each Claude run's reply, model and safeguard stops, and which files each run read, for `coverage.txt`. |
+| `lens-events.py` | Reads the runs' JSON events for `lenses.sh` and `refute.sh`: each Claude run's reply, model and safeguard stops, and which files each run read, for `coverage.txt`. |
 | `tests/` | Tests for `lens-events.py`, since it decides what counts as read and so whether the coverage ALERT is raised: `python3 -I -m unittest discover -s tests`. |
-| `threat-model-age.sh` | Says how far `THREAT-MODEL.md` is behind HEAD, and which files changed since the commit it names. |
+| `threat-model-age.sh` | Says how far `THREAT-MODEL.md` is behind the working tree, and which files changed since the commit it names, uncommitted and untracked ones included. |
 | `stamp.md` | The template for a project's `SENTINEL.md`, the record of its last audit, which `/snt:audit` fills at the end of step 5. |
 | `stamp-age.sh` | Says which files changed since the commit `SENTINEL.md` names, and exits 1 when any did. The release gate. |
 | `finding-format.md` | The format the pull request review and the lenses write their findings in. |
@@ -99,7 +99,8 @@ Give the jobs that build or publish `needs: audited`. It cannot tell a productio
 - `bash`, `git`, `python3`.
 - Claude Code, with the `claude-security` and `security-guidance` plugins from `claude-plugins-official`.
 - The mechanical tools: `mechanical/install.sh` on Arch, `ci/install-tools.sh` on CI runners.
-- For a lens pass on Codex: the Codex CLI (`codex`) on PATH, and an OpenAI API key or a Codex login.
+- For a lens pass or a cross-check on Codex: the Codex CLI (`codex`) on PATH, and an OpenAI API key or a Codex login.
+- `gh`, the GitHub CLI, for the secret, variable and settings checks in `/snt:onboard` and for `read-review.sh`, which needs `age` too.
 
 ## check.sh
 
@@ -163,7 +164,7 @@ What the reviewers can and cannot do:
 - They read a snapshot of the repo's tracked and untracked-but-not-ignored files in a private temp directory, so no run sees another run's output and nothing they do touches your working tree. `audit/`, `CLAUDE-SECURITY-*/` and the sentinel directory are left out of the snapshot, so the lenses never see the Claude Security report. Symlinks are left out too, because one could point a reviewer at a file outside the snapshot, and `run.txt` lists each one. Untracked files that are not ignored go in, since they are part of what is about to be committed, and `run.txt` lists them too, so you can see what left the machine when a reviewer runs on someone else's servers.
 - Claude gets only the Read, Grep and Glob tools, with nothing pre-approved, so any read or search outside the snapshot (your home directory, `/proc`) is refused. (`--bare` would drop Grep and Glob on Linux, which is why the runs use `--safe-mode`.) No settings file is loaded, neither the repo's `.claude/settings.json` nor your own, so an allow rule in your settings can't widen what a reviewer reads. The repo's hooks and MCP servers are not loaded, and neither are your own hooks, plugins, MCP servers or CLAUDE.md. Sessions are not saved.
 - Each CLI gets only its own API key.
-- Codex runs under a permission profile that makes only the snapshot, the system folders its commands need and its own install folder readable, with no writes and no network. The install folder is never a shared one like `~/.local`, and never one that holds your home folder or Codex's home and its login, with every path compared after symlinks are resolved; when codex is installed where that can't be avoided, `lenses.sh` refuses to run it. Its hosted web search is turned off, because that runs on OpenAI's side, where the profile can't reach. The commands it runs get only basic variables such as `PATH` and `HOME`, never `CODEX_API_KEY`. Codex's own `--sandbox read-only` is not used: it lets commands read the whole disk, home directory included, and silently overrides the profile. Without an API key, Codex loads your global `AGENTS.md`.
+- Codex runs under a permission profile that makes only the snapshot, the system folders its commands need and its own install folder readable, with no writes and no network. The install folder is never a shared one like `~/.local`, and never one that holds your home folder or Codex's home and its login, with every path compared after symlinks are resolved; when codex is installed where that can't be avoided, `lenses.sh` and `refute.sh` refuse to run it. Its hosted web search is turned off, because that runs on OpenAI's side, where the profile can't reach. The commands it runs get only basic variables such as `PATH` and `HOME`, never `CODEX_API_KEY`. Codex's own `--sandbox read-only` is not used: it lets commands read the whole disk, home directory included, and silently overrides the profile. Without an API key, Codex loads your global `AGENTS.md`.
 
 ## refute.sh
 

@@ -1,6 +1,6 @@
 ---
 name: onboard
-description: Onboard the current repository to the sentinel security-audit kit, once per repo - adds the kit as the .sentinel submodule, writes THREAT-MODEL.md from the code, the security-guidance rules, fuzz targets, deny.toml, the fast CI workflow and SECURITY.md, stopping after each step. Run only on an explicit /snt:onboard.
+description: Onboard the current repository to the sentinel security-audit kit, once per repo - adds the kit as the .sentinel submodule, writes THREAT-MODEL.md from the code, the security-guidance rules, fuzz targets, deny.toml, the fast CI workflow and SECURITY.md, then checks the repo's GitHub settings and adds the release gate, stopping after each step. Run only on an explicit /snt:onboard.
 disable-model-invocation: true
 ---
 

@@ -17,7 +17,7 @@ Write `THREAT-MODEL.md` at the repo root from `.sentinel/threat-model.template.m
 
 ## 3. Write the security-guidance rules
 
-Copy THREAT-MODEL.md's key points into `.claude/claude-security-guidance.md`, the file the security-guidance plugin reads. That plugin appends the file to every security review prompt as additive project rules, so:
+Copy THREAT-MODEL.md's key points into `.claude/claude-security-guidance.md`, the file the security-guidance plugin reads. That plugin appends the file to its review prompts as additive project rules, so:
 
 - Write plain markdown: a short plain-language threat model, then a review checklist of rules specific to this codebase (what it must never touch, where untrusted data enters, which calls need which guard). Leave out generic advice the model already knows.
 - Keep it well under 8 KB. The plugin's budget is 8 KB for this file and the user's own `~/.claude/claude-security-guidance.md` together, and it truncates past that.
