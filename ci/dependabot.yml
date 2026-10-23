@@ -1,0 +1,54 @@
+# Dependabot version updates. /snt:onboard copies this to .github/dependabot.yml
+# and keeps only the ecosystems the repo has. Security updates do not come from
+# this file: they are a repository setting, which onboarding checks as well.
+# Each ecosystem waits seven days before taking a new version, so a release
+# that turns out to be bad has a week to be pulled first.
+version: 2
+updates:
+  # The action pins in the workflows, SHA and version comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+  # The .sentinel pin, so a kit change arrives as a pull request that runs the
+  # new kit's checks before it is merged.
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+  # Dependabot reads 0.10 -> 0.11 as a minor update, but for a 0.x crate it
+  # breaks. Only patches are grouped; minor and major bumps arrive one per
+  # pull request.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      cargo:
+        patterns: ["*"]
+        update-types: ["patch"]
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: ["patch"]
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

@@ -71,6 +71,25 @@ Add a `SECURITY.md` with:
 - That the repository is audited with sentinel, with a link to https://github.com/jcrenshaw-dev/sentinel, and that the record of the last audit is `SENTINEL.md` at the repo root once an audit has run: what ran, how it went, and the open findings as counts. Say that the audit only finds and records: it fixes nothing and writes no tests.
 - What runs on every pull request and every push to main, in a sentence or two: the workflow from step 6 and whether it fails the pull request. For the full list of checks, point at the kit's README in the `.sentinel` submodule, which is pinned to the version this repo runs, instead of restating it, so the file does not go stale when the kit changes.
 
+## 8. Repository settings and the release gate (GitHub only)
+
+Skip this step if the repo has no GitHub remote. Everything here is a setting the pull request review's safety depends on, or a check that runs when no one has opened a pull request. Check each one with `gh`, show what is set, and for each one that is missing give the user the command to run in their own terminal, in one message at the end of the step. Never run these commands yourself: they change the repository for everyone who uses it, and the user has to say yes to each.
+
+- **Who can open pull requests.** A pull request runs its own copy of `fast.yml`, so whoever opens one controls what its review job does. Check `gh api repos/<owner>/<repo> --jq .pull_request_creation_policy`. If it is not `collaborators_only`:
+  `gh api -X PATCH repos/<owner>/<repo> -f pull_request_creation_policy=collaborators_only`
+  Say what it means: people outside the repo's collaborators cannot open pull requests at all.
+- **Rulesets.** List them with `gh api repos/<owner>/<repo>/rulesets --jq '.[] | "\(.id) \(.target) \(.name) \(.enforcement)"'` and read each with `gh api repos/<owner>/<repo>/rulesets/<id>`. The branch ruleset on the default branch has to block deletion and force pushes, require a pull request, and require the `mechanical` and `security-review` checks; the tag ruleset has to block deleting, moving or force-pushing any tag, so a published release can't be swapped. For whichever is missing:
+  `gh api -X POST repos/<owner>/<repo>/rulesets --input .sentinel/ci/ruleset-main.json`
+  `gh api -X POST repos/<owner>/<repo>/rulesets --input .sentinel/ci/ruleset-tags.json`
+  Say what the branch ruleset means: with no bypass actors, the owner also goes through a pull request with both checks green, and the review job has to finish, so an API outage holds a merge until the job is rerun. If the user wants to merge past a red check now and then, they add a bypass for the admin role in the ruleset's settings, and the record then means less. If the repo requires signed commits already, keep that rule when editing. A ruleset that exists but misses a check is edited by the user in the repo's settings; show which rule is missing.
+- **Secret scanning and push protection.** Check `gh api repos/<owner>/<repo> --jq '.security_and_analysis | "secret scanning \(.secret_scanning.status), push protection \(.secret_scanning_push_protection.status)"'`. If either is not `enabled`:
+  `gh api -X PATCH repos/<owner>/<repo> --input - <<< '{"security_and_analysis":{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}}'`
+- **Dependabot.** Alerts: `gh api repos/<owner>/<repo>/vulnerability-alerts` prints nothing when they are on and `404` when they are off; security updates: `gh api repos/<owner>/<repo>/automated-security-fixes --jq .enabled`. For whichever is off:
+  `gh api -X PUT repos/<owner>/<repo>/vulnerability-alerts`
+  `gh api -X PUT repos/<owner>/<repo>/automated-security-fixes`
+  Version updates: if `.github/dependabot.yml` is missing, copy `.sentinel/ci/dependabot.yml` there and keep only the ecosystems the repo has: `github-actions` and `gitsubmodule` always, `cargo` with a `Cargo.toml`, `npm` with a `package.json`, `pip` with a `requirements.txt` or `pyproject.toml`. Say that the `gitsubmodule` entry opens a pull request whenever sentinel moves, which runs the new kit's checks before the pin changes.
+- **The release gate.** If a workflow runs on `push: tags` or `release:`, show the user the `audited` job from the kit's README (section "The stamp") and where it would go in that workflow, and add it when they say so, with `needs: audited` on the jobs that build or publish. It runs `.sentinel/stamp-age.sh .`, which fails when any file changed since the commit `SENTINEL.md` names, or when there is no `SENTINEL.md` yet. Say that the first release after onboarding needs an audit first, since the stamp does not exist until `/snt:audit` has run. If there is no release workflow, say so and move on.
+
 ## Finish
 
-List every file created or changed, and anything marked `[VERIFY]` that the user still needs to check.
+List every file created or changed, anything marked `[VERIFY]` that the user still needs to check, and the settings from step 8 the user has not set yet.

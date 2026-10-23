@@ -45,6 +45,7 @@ It stops after each step for you to look. If a step is already done, it says so 
 | 5. deny.toml (Rust) | The baseline copied to the repo root, its license list fitted to the real dependencies, then `cargo deny check` | Read the output. Nothing gets fixed yet. |
 | 6. Fast CI workflow | `.github/workflows/fast.yml` (or `.forgejo/workflows/`), and the repo's `ANTHROPIC_API_KEY` Actions secret, which you set in your own terminal with `gh secret set ANTHROPIC_API_KEY -R <owner>/<repo>` when it asks. On a public repo, also the `SENTINEL_REVIEW_AGE_RECIPIENT` variable holding your age public key, so reviews are encrypted instead of posted | `gh secret list -R <owner>/<repo>` shows the secret and `gh variable list -R <owner>/<repo>` the variable. The key lives encrypted in GitHub's settings, never in git. |
 | 7. SECURITY.md | How to report, that the repo is audited with sentinel and where the last audit's record is (`SENTINEL.md`), and what runs on every pull request and push to `main`, pointing at the kit's README for the detail | It asks you for the reporting contact. It never makes one up. |
+| 8. Repository settings (GitHub) | Checks who can open pull requests, the rulesets on `main` and on tags, secret scanning with push protection, and Dependabot, and gives you the command for each one that is missing. Copies `.sentinel/ci/dependabot.yml` to `.github/dependabot.yml` with the ecosystems the repo has. Adds the `audited` job to the release workflow when there is one | You run each command yourself. They change the repo for everyone, so it never runs them. The branch ruleset puts you through a pull request with both checks green, too. |
 
 At the end it lists every file it created or changed. It does not commit; review the list and commit it yourself.
 
@@ -92,9 +93,10 @@ On a public repo, keep findings to yourself until they're fixed: no issue, no co
 |------|------------|
 | Every pull request, and every push to `main` | `fast.yml` runs by itself: the mechanical checks, and on a pull request Claude Opus 5.5 reviewing the diff alongside them and posting the result as a comment. On a public repo with the age variable set, the comment holds only the count of findings; read the review with `.sentinel/ci/read-review.sh <pull request number>`. The check fails if the review didn't actually run. The review runs only on pull requests; a push straight to `main` gets the mechanical checks alone. |
 | Before a release | `/snt:audit`, commit `SENTINEL.md`, then decide what to do with what it finds. |
-| Once, in the release workflow | Add the step `run: .sentinel/stamp-age.sh .` after a checkout with `submodules: recursive` and `fetch-depth: 0`. A release from a commit the last audit did not cover fails, and so does one with no `SENTINEL.md`. |
+| In a repo onboarded before the kit had the release gate | Add the `audited` job from the kit's README to the release workflow. A release from a commit the last audit did not cover fails, and so does one with no `SENTINEL.md`. |
+| Every Monday | `fast.yml` runs the mechanical checks on `main` by itself, so a new advisory shows up without a pull request. |
 | When the tool gains a new input, output, command or hook | Update `THREAT-MODEL.md` and `.claude/claude-security-guidance.md` first, then audit. The pull request review and your check of the Claude Security report both work from the threat model. |
-| When sentinel changes | Move the project's pin and commit it: `git submodule update --remote .sentinel` |
+| When sentinel changes | Move the project's pin and commit it: `git submodule update --remote .sentinel`. With the `gitsubmodule` entry in `.github/dependabot.yml`, Dependabot opens that pull request for you. check.sh reports when your `fast.yml` copy differs from the kit's; copy it again when the kit's changed. |
 | When the snt plugin changes | `claude plugin marketplace update sentinel && claude plugin update snt@sentinel`, then restart Claude Code |
 | Now and then | Rerun `mechanical/install.sh` to update the tools. |
 

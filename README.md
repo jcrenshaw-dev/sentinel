@@ -17,7 +17,7 @@ claude plugin install snt@sentinel
 
 Then, in a project:
 
-- `/snt:onboard` sets the repo up, once. It adds the kit as a git submodule at `.sentinel`, writes `THREAT-MODEL.md` from the code, the security-guidance rules, fuzz targets and `deny.toml` for Rust, the fast CI workflow and `SECURITY.md`. It stops after each step for you to look, and it does not run the audit.
+- `/snt:onboard` sets the repo up, once. It adds the kit as a git submodule at `.sentinel`, writes `THREAT-MODEL.md` from the code, the security-guidance rules, fuzz targets and `deny.toml` for Rust, the fast CI workflow and `SECURITY.md`. On GitHub it then checks the repository's settings, who can open pull requests, the rulesets on `main` and on tags, secret scanning, Dependabot, and gives you the command for each one that is missing; and it adds the release gate to the release workflow. It stops after each step for you to look, and it does not run the audit.
 - `/snt:audit` runs the audit below, stopping after each step. It finds and records; it does not fix, write tests or commit anything.
 
 Each project runs the sentinel version its `.sentinel` submodule is pinned to. Updating a step or a script happens once here, and a project picks it up by moving its pin.
@@ -26,7 +26,7 @@ Each project runs the sentinel version its `.sentinel` submodule is pinned to. U
 
 What `/snt:audit` runs, in order:
 
-0. **Threat model age.** `.sentinel/threat-model-age.sh .` compares the commit `THREAT-MODEL.md` names with HEAD and lists the files changed since. If production files it covers changed, the audit stops and asks whether to update it first or continue with the gap logged, because every later step judges findings against it.
+0. **Threat model age.** `.sentinel/threat-model-age.sh .` compares the commit `THREAT-MODEL.md` names with the working tree and lists the files changed since, uncommitted and untracked ones included. If production files it covers changed, the audit stops and asks whether to update it first or continue with the gap logged, because every later step judges findings against it.
 
 1. **Mechanical checks.** `.sentinel/mechanical/check.sh .`, with the output saved to `audit/check.txt`. If the repo has fuzz targets, the audit asks first how to fuzz: a smoke test of 60 seconds per target, one at a time; a long run of 30 minutes per target, as many at once as the machine's cores and memory allow; or no fuzzing.
 2. **Claude Security scan.** `/claude-security`, a release, branch or quick scan, picked when the step starts. Its report is copied to `audit/claude-security.md`. After a whole-repository scan, any production file the scan did not cover is flagged with an ALERT, and a scoped scan of those files is offered. Its suggest-patches job is never run.
@@ -46,14 +46,23 @@ Everything the audit writes goes under `audit/`, apart from Claude Security's ow
 .sentinel/stamp-age.sh .
 ```
 
-It prints that commit, how many commits HEAD is ahead of it, and the files changed since, uncommitted and untracked ones included. It exits 1 when any file but `SENTINEL.md` changed, and 2 when there is no `SENTINEL.md` or it names no commit in the repo. As a step in a release workflow, after a checkout with `submodules: recursive` and `fetch-depth: 0`, it stops a release the last audit did not cover, and a release with no audit record at all:
+It prints that commit, how many commits HEAD is ahead of it, and the files changed since, uncommitted and untracked ones included. It exits 1 when any file but `SENTINEL.md` changed, and 2 when there is no `SENTINEL.md` or it names no commit in the repo. As a job in a release workflow, it stops a release the last audit did not cover, and a release with no audit record at all. `/snt:onboard` adds it when the repo has a release workflow:
 
 ```yaml
-      - name: Check that the last audit covers this release
+  audited:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          # The audited commit has to be in the history.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The last audit covers this release
         run: .sentinel/stamp-age.sh .
 ```
 
-It cannot tell a production file from a document, so a docs-only change since the audit fails it too. When that happens, either tag the release from the audited commit or run `/snt:audit` again and commit the new `SENTINEL.md`.
+Give the jobs that build or publish `needs: audited`. It cannot tell a production file from a document, so a docs-only change since the audit fails it too. When that happens, either tag the release from the audited commit or run `/snt:audit` again and commit the new `SENTINEL.md`.
 
 ## What is in it
 
@@ -73,7 +82,9 @@ It cannot tell a production file from a document, so a docs-only change since th
 | `mechanical/install.sh` | Installs those tools on Arch Linux. |
 | `mechanical/deny.toml` | cargo-deny baseline. A repo's own `deny.toml` takes precedence. |
 | `mechanical/semgrep.yml` | The semgrep rulesets check.sh runs, and the rules it skips. |
-| `ci/fast.yml` | The pull request and push-to-main workflow for GitHub Actions and Forgejo Actions. |
+| `ci/fast.yml` | The pull request, push-to-main and weekly workflow for GitHub Actions and Forgejo Actions. |
+| `ci/ruleset-main.json`, `ci/ruleset-tags.json` | The GitHub rulesets `/snt:onboard` asks you to create: a pull request with the `mechanical` and `security-review` checks green for every change to `main`, and no deleting or moving tags. |
+| `ci/dependabot.yml` | The Dependabot template `/snt:onboard` copies to `.github/dependabot.yml`, trimmed to the ecosystems the repo has: weekly, grouped patches, a seven-day wait on each new version, and the `.sentinel` pin among them. |
 | `ci/install-tools.sh` | Installs the mechanical tools on a Debian or Ubuntu CI runner. |
 | `ci/security-review.sh`, `ci/security-review.md` | The pull request review `fast.yml` runs, and its prompt. |
 | `ci/read-review.sh` | Decrypts a pull request's private review on your machine. |
@@ -103,7 +114,9 @@ Gates fail the run when they fail or when the tool is not installed. Everything 
 | `cargo +nightly fuzz build` | a `fuzz/` directory at the root or in any workspace member | report |
 | `cargo +nightly fuzz run` on each target `cargo fuzz list` names, for `SENTINEL_FUZZ_SECONDS` seconds each, `SENTINEL_FUZZ_JOBS` targets at a time (default 1). It shows only the lines that say what happened and the path of each new artifact, never the crashing input. | a `fuzz/` directory, and `SENTINEL_FUZZ_SECONDS` set (`/snt:audit` sets both from the answer to its fuzzing question; CI sets neither) | report |
 | `cargo +nightly miri nextest run --workspace --lib --bins --no-fail-fast` with isolation off (unit tests only). nextest runs each test in its own Miri process, so a test that calls into C or starts a process, which Miri cannot run, stops only itself. Each test is stopped after 5 minutes (`miri-nextest.toml`). | the repo's own Rust code has an `unsafe` block, fn, impl, trait or extern, and nightly has Miri installed (CI runners skip it) | report |
+| Findings stay out of git: fails when any file under `audit/` or `CLAUDE-SECURITY-*/` is tracked, printing the names only. | the repo is a git checkout | gate |
 | `gitleaks git --redact` over every commit on every ref. It shows only each finding's fingerprint (`commit:file:rule:line`), never the secret or the line it is on. | the repo is a git checkout | report |
+| `diff` of the repo's `fast.yml` against the kit's `ci/fast.yml`, so a copy that has drifted, or a kit whose pins are behind the copy's, shows. | a tracked `.github/workflows/fast.yml` or `.forgejo/workflows/fast.yml` | report |
 | `shellcheck -S warning` (errors and warnings, no style notes) on the tracked files named `*.sh` or `*.bash` and the tracked files whose first line runs `sh` or `bash`. zsh scripts are left out, since shellcheck can't read zsh. | the repo is a git checkout with at least one such script | report |
 | `zizmor --offline` on the tracked workflows in `.github/workflows/` and `.forgejo/workflows/`, every tracked `action.yml`, and `.github/dependabot.yml`. Offline, it makes no network calls and uses no GitHub token, so it skips the audits that need GitHub's API, such as known-vulnerable action versions. | the repo has at least one such tracked file | report |
 | `npm audit` | `package.json` and `package-lock.json` exist | report |
@@ -161,7 +174,7 @@ gh secret set ANTHROPIC_API_KEY -R <owner>/<repo>
 
 If the project needs system libraries to build, add them to the install step.
 
-`fast.yml` runs on every pull request and every push to `main`. The `mechanical` job runs on both, on GitHub and Forgejo, and runs check.sh with the gating tools, gitleaks, shellcheck and zizmor. It fetches the whole history so gitleaks can read it, and it never runs the fuzz targets, because CI does not set `SENTINEL_FUZZ_SECONDS`. The `security-review` job runs `ci/security-review.sh` alongside it, on GitHub pull requests only, because it posts its result as a pull request comment through the GitHub API. It does not wait for the mechanical job, so a failing gate, such as a new advisory against a dependency already in use, does not skip the review. It installs a pinned Claude Code (2.1.300) on Node 22, has Claude Opus 5.5 review the pull request's diff against `THREAT-MODEL.md` with read-only tools and none of the pull request's own `.claude` settings loaded, and writes the review in the finding format. The checkout keeps no GitHub token in `.git/config`, the reviewer is refused any read outside the checkout and inside `.git`, and output that contains the API key is deleted and fails the job instead of being posted. The job fails when the review did not run or its output holds neither findings nor a "No findings" marker, so a passing check means a review happened. Findings do not fail the job; they are posted for the author to read. The actions the workflow uses are pinned to commits, not tags. Pull requests opened by Dependabot skip the review, because GitHub gives them no Actions secrets; the mechanical job's dependency checks still run on them. On a runner without rustup, `install-tools.sh` downloads a pinned rustup-init version and refuses it unless its SHA-256 matches the one in the script. It pins cargo-audit, cargo-deny, semgrep, gitleaks, shellcheck and zizmor to versions in the script too, and checks the gitleaks and shellcheck downloads against their SHA-256 the same way.
+`fast.yml` runs on every pull request, every push to `main`, and once a week on `main`, Mondays at 06:17 UTC, so a new advisory against a dependency already in use shows up without waiting for a pull request. The `mechanical` job runs on all three, on GitHub and Forgejo, and runs check.sh with the gating tools, gitleaks, shellcheck and zizmor. It fetches the whole history so gitleaks can read it, and it never runs the fuzz targets, because CI does not set `SENTINEL_FUZZ_SECONDS`. The `security-review` job runs `ci/security-review.sh` alongside it, on GitHub pull requests from the repository itself only, because it posts its result as one pull request comment through the GitHub API, rewritten on each push, and a pull request from a fork gets no secrets, so it skips the job instead of failing it. A newer push to a pull request cancels the run of the older one. It does not wait for the mechanical job, so a failing gate, such as a new advisory against a dependency already in use, does not skip the review. It installs a pinned Claude Code (2.1.300) on Node 22, has Claude Opus 5.5 review the pull request's diff against `THREAT-MODEL.md` with read-only tools and none of the pull request's own `.claude` settings loaded, and writes the review in the finding format. The checkout keeps no GitHub token in `.git/config`, the reviewer is refused any read outside the checkout and inside `.git`, and output that contains the API key is deleted and fails the job instead of being posted. The job fails when the review did not run or its output holds neither findings nor a "No findings" marker, so a passing check means a review happened. Findings do not fail the job; they are posted for the author to read. The actions the workflow uses are pinned to commits, not tags. Pull requests opened by Dependabot skip the review, because GitHub gives them no Actions secrets; the mechanical job's dependency checks still run on them. On a runner without rustup, `install-tools.sh` downloads a pinned rustup-init version and refuses it unless its SHA-256 matches the one in the script. It pins cargo-audit, cargo-deny, semgrep, gitleaks, shellcheck and zizmor to versions in the script too, and checks the gitleaks and shellcheck downloads against their SHA-256 the same way.
 
 On a public repo the comment, the job log and the job summary are public, and a review can describe a bug in code that is already released. Set the repository variable `SENTINEL_REVIEW_AGE_RECIPIENT` to your [age](https://github.com/FiloSottile/age) public key and the job installs age, encrypts the review to the `security-review` artifact (kept 14 days), and the comment, log and summary show only the count of findings by severity. The artifact is readable by anyone who can read the repo, but only your key opens it. Read it from the repo's checkout:
 
@@ -171,7 +184,9 @@ On a public repo the comment, the job log and the job summary are public, and a 
 
 It finds the newest `fast.yml` run for the pull request's head commit, downloads the artifact to a temporary folder, and prints it with control characters removed after decrypting it with `~/.config/sentinel/age.key`, or the identity in `SENTINEL_AGE_IDENTITY` or its second argument. Without the variable the whole review is posted, as before.
 
-A pull request runs its own copy of `fast.yml` and of the kit's scripts, so whoever opens it controls what its review job does. The review helps trusted authors catch mistakes; it is not a gate against them. Limit who can open pull requests to collaborators (`gh api -X PATCH repos/<owner>/<repo> -f pull_request_creation_policy=collaborators_only`). `read-review.sh` reads only a review from a run of the repo's own `fast.yml` on one of its own branches, never one from a fork, which never gets the API key and so can only hold a forged review.
+A pull request runs its own copy of `fast.yml` and of the kit's scripts, so whoever opens it controls what its review job does. The review helps trusted authors catch mistakes; it is not a gate against them. Limit who can open pull requests to collaborators (`gh api -X PATCH repos/<owner>/<repo> -f pull_request_creation_policy=collaborators_only`); `/snt:onboard` checks this, along with the rulesets that make the two checks required, secret scanning and Dependabot, and gives you the command for each one that is missing. `read-review.sh` reads only a review from a run of the repo's own `fast.yml` on one of its own branches, never one from a fork, which never gets the API key and so can only hold a forged review.
+
+The action pins in `ci/fast.yml`, the tool versions and hashes in `ci/install-tools.sh` and the Claude Code version are bumped here by hand. Dependabot bumps the copy of `fast.yml` in your repo, and check.sh then reports the difference between the copy and the kit's, which is the sign the kit's pins are behind.
 
 The diff is untrusted input, and text in it can try to steer the review. The prompt tells Claude to treat it as data, which narrows that but cannot rule it out, so the review is for trusted pull requests; require approval for workflows from outside contributors. `SENTINEL_REVIEW_MODEL` and `SENTINEL_REVIEW_EFFORT` override the model and effort.
 
@@ -185,4 +200,4 @@ On Forgejo, the `ubuntu-latest` label must be mapped to an image on the runner.
 - Checking the Claude Security report against `THREAT-MODEL.md`. Claude Security builds its own threat model and does not read yours, so check that every trust boundary yours names was looked at, and rerun the scan with `--scope` on any it missed.
 - Deciding what to do with the findings. `/snt:audit` only finds and records.
 - Committing. Neither skill commits anything, `SENTINEL.md` included: the audit writes it and you commit it.
-- Adding the release gate, `.sentinel/stamp-age.sh .`, to the release workflow.
+- Running the settings commands `/snt:onboard` gives you, and adding the release gate to a repo onboarded before the kit had one.
