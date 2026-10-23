@@ -16,6 +16,7 @@
 set -uo pipefail
 
 mech=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
+kit=$(dirname "$mech")
 repo=$(realpath "${1:-.}")
 [[ -d $repo ]] || { echo "check.sh: $repo is not a directory" >&2; exit 2; }
 cd "$repo" || exit 2
@@ -291,10 +292,40 @@ gitleaks_history() {
     rm -f "$report"
     return "$rc"
 }
+# The audit writes its findings under audit/ and Claude Security under
+# CLAUDE-SECURITY-*/, both gitignored by /snt:onboard. A tracked file in
+# either would publish unfixed findings with the next push, so one fails the
+# run. Only the names are printed, never the contents.
+findings_tracked() {
+    local files
+    files=$(git ls-files -- audit 'CLAUDE-SECURITY-*')
+    [[ -n $files ]] || return 0
+    echo "tracked files that hold audit findings; remove them from git:"
+    sed 's/^/  /' <<< "$files"
+    return 1
+}
+# The workflow in the repo is a copy of the kit's ci/fast.yml, made when the
+# repo was onboarded, and the two drift apart as the kit changes or Dependabot
+# moves the copy's pins. A report, not a gate: a repo may add its own build
+# libraries to the install step. Only a tracked regular file inside the repo
+# is compared, since diff prints the lines it finds.
+fast_drift() {
+    local copy rc=0
+    while IFS= read -r -d '' copy; do
+        diff -u "$copy" "$kit/ci/fast.yml" || rc=1
+    done < <(tracked ':(glob).github/workflows/fast.yml' ':(glob).forgejo/workflows/fast.yml')
+    return "$rc"
+}
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    step gate "findings stay out of git" git findings_tracked
     step report "gitleaks (git history)" gitleaks gitleaks_history
+    if [[ -n $(tracked ':(glob).github/workflows/fast.yml' ':(glob).forgejo/workflows/fast.yml') ]]; then
+        step report "fast.yml matches the kit" diff fast_drift
+    else
+        skip "fast.yml matches the kit" "no tracked .github/workflows/fast.yml or .forgejo/workflows/fast.yml"
+    fi
 else
-    skip "gitleaks" "not a git repository"
+    skip "findings stay out of git, gitleaks and fast.yml" "not a git repository"
 fi
 
 # Shell scripts are the tracked files named *.sh or *.bash and the tracked
