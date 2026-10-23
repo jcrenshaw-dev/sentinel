@@ -11,6 +11,10 @@
 # snapshot in $work/repo, and the settings below from the environment.
 # shellcheck disable=SC2154  # repo, providers and out are the caller's
 
+# Everything these scripts write under audit/ holds unfixed findings, so no
+# other user on the machine gets to read it.
+umask 077
+
 MODEL="${SENTINEL_MODEL:-opus}"
 EFFORT="${SENTINEL_EFFORT:-xhigh}"
 # Set here because with an API key Codex runs with an empty CODEX_HOME and never
@@ -77,7 +81,7 @@ make_out() {
 # real working tree. The kit itself is left out when it lives inside the repo,
 # and so are /claude-security reports, so the reviewers stay independent of the
 # scan. They are named here as well as gitignored, in case the ignore lines
-# are missing. Sets work, excludes, links and snapshot_files.
+# are missing. Sets work, excludes, links, untracked and snapshot_files.
 make_snapshot() {
     work=$(mktemp -d)
     trap 'rm -rf "$work"' EXIT
@@ -105,6 +109,11 @@ make_snapshot() {
     links=$(cd "$work/repo" && find . -type l -printf '%P -> %l\0' |
         LC_ALL=C tr -d '\001-\037\177' | tr '\0' '\n')
     find "$work/repo" -type l -delete
+    # The untracked files that went in, so run.txt says what left the machine
+    # when the reviewer runs on someone else's servers. Control characters are
+    # stripped as above.
+    untracked=$(git -C "$repo" ls-files -z --others --exclude-standard -- . "${excludes[@]}" |
+        LC_ALL=C tr -d '\001-\037\177' | tr '\0' '\n')
     snapshot_files=$(find "$work/repo" -type f -printf '.' | wc -c)
     mkdir "$work/reads"
 }
@@ -164,6 +173,12 @@ run_header() {
         printf '%s\n' "$links" | sed 's/^/  /'
     else
         echo "symlinks left out of the snapshot: none"
+    fi
+    if [[ -n $untracked ]]; then
+        echo "untracked files in the snapshot:"
+        printf '%s\n' "$untracked" | sed 's/^/  /'
+    else
+        echo "untracked files in the snapshot: none"
     fi
 }
 
