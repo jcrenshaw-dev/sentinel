@@ -17,3 +17,7 @@ exclude-rules:
   - rust.lang.security.args.args
   - rust.lang.security.args-os.args-os
   - rust.lang.security.current-exe.current-exe
+  # Two bandit rules that flag every script: an assert statement, and
+  # importing subprocess. Neither is a finding.
+  - gitlab.bandit.B101
+  - gitlab.bandit.B404

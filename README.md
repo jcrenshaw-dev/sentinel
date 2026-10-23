@@ -127,7 +127,7 @@ Each fuzz run starts from the inputs earlier runs found, which cargo fuzz keeps 
 
 shellcheck and zizmor get only tracked regular files that resolve inside the repo, never a symlink. Both print the lines they complain about, so a symlink posing as a script or workflow could otherwise put a file from elsewhere, a key or `/proc/self/environ`, into the output, and on CI into a public log.
 
-semgrep runs with `--metrics=off`, and its rulesets include semgrep's copy of the bandit rules, so bandit itself does not run. `semgrep.yml` also lists rules to skip: the three p/rust rules that flag reading the program's arguments or its own path (`args`, `args-os`, `current-exe`), which fire on every command-line tool.
+semgrep runs with `--metrics=off`, and its rulesets include semgrep's copy of the bandit rules, so bandit itself does not run. `semgrep.yml` also lists rules to skip: the three p/rust rules that flag reading the program's arguments or its own path (`args`, `args-os`, `current-exe`), which fire on every command-line tool, and the two bandit rules that fire on every script, an `assert` statement (B101) and `import subprocess` (B404).
 
 ### Keeping a fixed finding fixed
 
