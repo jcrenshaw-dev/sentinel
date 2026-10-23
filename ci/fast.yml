@@ -83,8 +83,10 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+      # The version is pinned. A global npm install has no lockfile, which is
+      # what zizmor's adhoc-packages audit looks for.
       - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code@2.1.300
+        run: npm install -g @anthropic-ai/claude-code@2.1.300 # zizmor: ignore[adhoc-packages]
       - name: Install age
         if: vars.SENTINEL_REVIEW_AGE_RECIPIENT != ''
         run: sudo apt-get update -q && sudo apt-get install -y -q age
