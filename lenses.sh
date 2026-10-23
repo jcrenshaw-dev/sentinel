@@ -140,6 +140,9 @@ fi
     # The lenses judge against THREAT-MODEL.md, so record how current it was.
     tm_age=$("$sentinel/threat-model-age.sh" "$repo" || true)
     echo "threat model: ${tm_age%%$'\n'*}"
+    # SENTINEL.md names the commit the previous audit covered.
+    stamp_age=$("$sentinel/stamp-age.sh" "$repo" || true)
+    echo "previous audit: ${stamp_age%%$'\n'*}"
     echo "started: $ts"
     echo "providers: ${providers[*]}"
     [[ ${providers[*]} != *claude* ]] || echo "claude: model $MODEL, effort $EFFORT, auth: $claude_auth"

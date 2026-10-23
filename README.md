@@ -32,9 +32,28 @@ What `/snt:audit` runs, in order:
 2. **Claude Security scan.** `/claude-security`, a release, branch or quick scan, picked when the step starts. Its report is copied to `audit/claude-security.md`. After a whole-repository scan, any production file the scan did not cover is flagged with an ALERT, and a scoped scan of those files is offered. Its suggest-patches job is never run.
 3. **Lens pass.** Eight review prompts, one concern each, run once each on Claude, on Codex, on both, or skipped. You choose each time, and the question states the cost. `.sentinel/lenses.sh` runs them.
 4. **Check.** Every lens finding the Claude Security report and `THREAT-MODEL.md` don't already cover goes to read-only subagents as a neutral claim, with no word of which model or lens found it or what severity it was given. Each subagent tries to prove its claims wrong, and only the ones that stand, traced at file:line, reach `audit/lenses.md` with the severity the check gave them. The subagents are Claude, so a Claude lens's findings are checked by the same model family.
-5. **Findings register and log.** Every finding gets an ID, `<repo>-NNN`, that stays the same from audit to audit, in `audit/findings.md`. A finding that matches a known one, judged by the code and not by line numbers, keeps its ID. Open findings an audit doesn't report get a note, never a status: only you mark a finding `fixed` or `accepted`. A finding you've marked `accepted` that comes back is left out of what the audit shows you and counted instead. If you accepted it because it's by design, saying so in `THREAT-MODEL.md` also stops the lenses and the pull request review from raising it. One row per step goes in `audit/findings-log.md`, with counts of new, known and unreported findings.
+5. **Findings register and log.** Every finding gets an ID, `<repo>-NNN`, that stays the same from audit to audit, in `audit/findings.md`. A finding that matches a known one, judged by the code and not by line numbers, keeps its ID. Open findings an audit doesn't report get a note, never a status: only you mark a finding `fixed` or `accepted`. A finding you've marked `accepted` that comes back is left out of what the audit shows you and counted instead. If you accepted it because it's by design, saying so in `THREAT-MODEL.md` also stops the lenses and the pull request review from raising it. One row per step goes in `audit/findings-log.md`, with counts of new, known and unreported findings. Then it writes `SENTINEL.md` at the repo root from `stamp.md`: what ran, how each step went, and the open findings as counts by severity, with no locations. It describes the last audit only, and you commit it.
 
-Everything the audit writes goes under `audit/`, apart from Claude Security's own `CLAUDE-SECURITY-<timestamp>/` folder. `/snt:onboard` puts both in `.gitignore`, because they hold unfixed vulnerability findings.
+Everything the audit writes goes under `audit/`, apart from Claude Security's own `CLAUDE-SECURITY-<timestamp>/` folder and `SENTINEL.md`. `/snt:onboard` puts the first two in `.gitignore`, because they hold unfixed vulnerability findings. `SENTINEL.md` holds counts and nothing a finding could be found from, and it is meant to be committed.
+
+## The stamp
+
+`SENTINEL.md` is the one thing an audit leaves in the repository for a user to read. The audit writes it and you commit it. It says the date, the commit it covered, the sentinel commit, how current `THREAT-MODEL.md` was, what each step ran and how it went, whether every production file was read by at least one reviewer, and the open and accepted findings as counts by severity. It never holds a finding's title or location: an open finding stays private until it is fixed. It ends with what the record does not say. The audit builds the code, runs its fuzz targets and its unit tests under Miri, and reads the rest; nobody attacked the running program or wrote an exploit, the reviewers are models and miss things, and it names which checks were done by the same model family that made the finding.
+
+`stamp-age.sh` says how far a repository has moved since the commit `SENTINEL.md` names:
+
+```
+.sentinel/stamp-age.sh .
+```
+
+It prints that commit, how many commits HEAD is ahead of it, and the files changed since, uncommitted and untracked ones included. It exits 1 when any file but `SENTINEL.md` changed, and 2 when there is no `SENTINEL.md` or it names no commit in the repo. As a step in a release workflow, after a checkout with `submodules: recursive` and `fetch-depth: 0`, it stops a release the last audit did not cover, and a release with no audit record at all:
+
+```yaml
+      - name: Check that the last audit covers this release
+        run: .sentinel/stamp-age.sh .
+```
+
+It cannot tell a production file from a document, so a docs-only change since the audit fails it too. When that happens, either tag the release from the audited commit or run `/snt:audit` again and commit the new `SENTINEL.md`.
 
 ## What is in it
 
@@ -46,6 +65,8 @@ Everything the audit writes goes under `audit/`, apart from Claude Security's ow
 | `lenses.sh` | Runs every lens once through `claude -p`, `codex exec` or both. |
 | `lens-events.py` | Reads the lens runs' JSON events for `lenses.sh`: each Claude run's reply, model and safeguard stops, and which files each run read, for `coverage.txt`. |
 | `threat-model-age.sh` | Says how far `THREAT-MODEL.md` is behind HEAD, and which files changed since the commit it names. |
+| `stamp.md` | The template for a project's `SENTINEL.md`, the record of its last audit, which `/snt:audit` fills at the end of step 5. |
+| `stamp-age.sh` | Says which files changed since the commit `SENTINEL.md` names, and exits 1 when any did. The release gate. |
 | `finding-format.md` | The format the pull request review and the lenses write their findings in. |
 | `skills/<name>/steps.md` | The steps of `/snt:audit` and `/snt:onboard`. The plugin's skills are short stubs that read these from the project's `.sentinel`, so the steps always match the pinned kit. |
 | `mechanical/check.sh` | Runs cargo audit, cargo deny, clippy, semgrep and the rest, depending on what the repo contains. |
@@ -109,7 +130,7 @@ Write the rule for the one bug, not the general idea. A rule that flags every `f
 lenses.sh <repo-dir> <claude|codex|both>
 ```
 
-Each lens runs once on each provider you name. Claude runs three lenses at a time and Codex four, and with `both` Claude finishes before Codex starts. Results go to `<repo>/audit/lenses/<timestamp>/<provider>/<lens>.md`, each with a `.log`, plus `run.txt` recording the commit, models, settings and each run's status. A run that fails, ends in a refusal (`BLOCKED`), or doesn't read as a report (`UNPARSEABLE`: no `## Finding` block and no `## No findings` block listing what it examined) leaves only its `.log`, so a refusal never counts as a clean result. Claude runs record the model that answered and say `MODEL DIFFERS` when it isn't the one asked for. When a safeguard stops one reply and the run still ends with a readable report, the report is kept and the line says `SAFETY STOP during the run`, since part of that lens's work may be missing. Codex's output doesn't name its model, so Codex runs get only the format check. `coverage.txt` lists the files in the snapshot that no run with a report read, then those read only in part, then every file with the runs that read it. A file counts only when its contents reached the model. For Claude that's a Read call that didn't return an error, and the lines it returned decide whether the read was full or partial. For Codex it's a snapshot path given to a command that prints file contents (`cat`, `nl`, `sed`, `head`, `grep`, `rg` and the like), in a command that exited 0, with output that wasn't redirected or piped into something that doesn't print it, like `wc`. Anything `lens-events.py` can't account for doesn't count. The lenses are targeted, so they read only part of a repository, and the Claude Security scan is the one meant to read it all. `/snt:audit` raises an alert only for production files that neither the lenses nor Claude Security covered.
+Each lens runs once on each provider you name. Claude runs three lenses at a time and Codex four, and with `both` Claude finishes before Codex starts. Results go to `<repo>/audit/lenses/<timestamp>/<provider>/<lens>.md`, each with a `.log`, plus `run.txt` recording the commit, how current `THREAT-MODEL.md` and `SENTINEL.md` were, models, settings and each run's status. A run that fails, ends in a refusal (`BLOCKED`), or doesn't read as a report (`UNPARSEABLE`: no `## Finding` block and no `## No findings` block listing what it examined) leaves only its `.log`, so a refusal never counts as a clean result. Claude runs record the model that answered and say `MODEL DIFFERS` when it isn't the one asked for. When a safeguard stops one reply and the run still ends with a readable report, the report is kept and the line says `SAFETY STOP during the run`, since part of that lens's work may be missing. Codex's output doesn't name its model, so Codex runs get only the format check. `coverage.txt` lists the files in the snapshot that no run with a report read, then those read only in part, then every file with the runs that read it. A file counts only when its contents reached the model. For Claude that's a Read call that didn't return an error, and the lines it returned decide whether the read was full or partial. For Codex it's a snapshot path given to a command that prints file contents (`cat`, `nl`, `sed`, `head`, `grep`, `rg` and the like), in a command that exited 0, with output that wasn't redirected or piped into something that doesn't print it, like `wc`. Anything `lens-events.py` can't account for doesn't count. The lenses are targeted, so they read only part of a repository, and the Claude Security scan is the one meant to read it all. `/snt:audit` raises an alert only for production files that neither the lenses nor Claude Security covered.
 
 Settings, set as environment variables:
 
@@ -154,7 +175,7 @@ A pull request runs its own copy of `fast.yml` and of the kit's scripts, so whoe
 
 The diff is untrusted input, and text in it can try to steer the review. The prompt tells Claude to treat it as data, which narrows that but cannot rule it out, so the review is for trusted pull requests; require approval for workflows from outside contributors. `SENTINEL_REVIEW_MODEL` and `SENTINEL_REVIEW_EFFORT` override the model and effort.
 
-The full audit has no workflow. It needs a Claude Code session for the Claude Security scan, and its findings must stay off public CI, so it runs only on your machine through `/snt:audit`.
+The full audit has no workflow. It needs a Claude Code session for the Claude Security scan, and its findings must stay off public CI, so it runs only on your machine through `/snt:audit`. What CI can check is that it happened and what it covered: the release gate in [The stamp](#the-stamp).
 
 On Forgejo, the `ubuntu-latest` label must be mapped to an image on the runner.
 
@@ -163,4 +184,5 @@ On Forgejo, the `ubuntu-latest` label must be mapped to an image on the runner.
 - Checking every `[VERIFY]` mark `/snt:onboard` leaves in `THREAT-MODEL.md`, and keeping the threat model current.
 - Checking the Claude Security report against `THREAT-MODEL.md`. Claude Security builds its own threat model and does not read yours, so check that every trust boundary yours names was looked at, and rerun the scan with `--scope` on any it missed.
 - Deciding what to do with the findings. `/snt:audit` only finds and records.
-- Committing. Neither skill commits anything.
+- Committing. Neither skill commits anything, `SENTINEL.md` included: the audit writes it and you commit it.
+- Adding the release gate, `.sentinel/stamp-age.sh .`, to the release workflow.

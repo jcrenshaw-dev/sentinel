@@ -44,7 +44,7 @@ It stops after each step for you to look. If a step is already done, it says so 
 | 4. Fuzz targets (Rust) | cargo-fuzz targets for every function that parses outside input (JSONL, config, CLI, MCP payloads), in the crate that owns it, each one built | They all compile and the main build still works. It also reports whether the code has `unsafe`; check.sh runs Miri on its own when it does. |
 | 5. deny.toml (Rust) | The baseline copied to the repo root, its license list fitted to the real dependencies, then `cargo deny check` | Read the output. Nothing gets fixed yet. |
 | 6. Fast CI workflow | `.github/workflows/fast.yml` (or `.forgejo/workflows/`), and the repo's `ANTHROPIC_API_KEY` Actions secret, which you set in your own terminal with `gh secret set ANTHROPIC_API_KEY -R <owner>/<repo>` when it asks. On a public repo, also the `SENTINEL_REVIEW_AGE_RECIPIENT` variable holding your age public key, so reviews are encrypted instead of posted | `gh secret list -R <owner>/<repo>` shows the secret and `gh variable list -R <owner>/<repo>` the variable. The key lives encrypted in GitHub's settings, never in git. |
-| 7. SECURITY.md | How to report, what runs on every pull request and every push to `main`, what the full audit runs, and a link to sentinel | It asks you for the reporting contact. It never makes one up. |
+| 7. SECURITY.md | How to report, that the repo is audited with sentinel and where the last audit's record is (`SENTINEL.md`), and what runs on every pull request and push to `main`, pointing at the kit's README for the detail | It asks you for the reporting contact. It never makes one up. |
 
 At the end it lists every file it created or changed. It does not commit; review the list and commit it yourself.
 
@@ -66,7 +66,7 @@ It stops after each step.
 | 2. Claude Security scan | `/claude-security`, a release, branch or quick scan, picked when the step starts; its report is copied to `audit/claude-security.md` | The findings by severity, any ALERT line about production files the scan did not cover, and, after a release scan, whether it looked at every trust boundary `THREAT-MODEL.md` names. Rerun it with `--scope` on any it missed. |
 | 3. Lens pass | Asks Claude, Codex, both or skip, with the cost, then runs `.sentinel/lenses.sh` | Your choice. Nothing runs until you make it. |
 | 4. Check | Read-only subagents try to refute each new lens finding, given as a neutral claim with no provider, lens or severity, and the ones that stand go to `audit/lenses.md` | The findings that stand, by severity, what was refuted, and what was set aside and why. |
-| 5. Findings register and log | Each finding gets its stable ID in `audit/findings.md`, new or matched to a known one, and open findings this audit didn't report get a note. One row per step in `audit/findings-log.md`: the tools that failed, and the findings by severity for Claude Security and the lenses, with counts of new, known and unreported | Only you set a finding's status to `fixed` or `accepted`. The notes columns are yours to fill in. |
+| 5. Findings register and log | Each finding gets its stable ID in `audit/findings.md`, new or matched to a known one, and open findings this audit didn't report get a note. One row per step in `audit/findings-log.md`: the tools that failed, and the findings by severity for Claude Security and the lenses, with counts of new, known and unreported. Then `SENTINEL.md` at the repo root: what ran, how it went, and the open findings as counts | Only you set a finding's status to `fixed` or `accepted`. The notes columns are yours to fill in. Read `SENTINEL.md` and commit it. |
 
 Where everything lands:
 
@@ -80,8 +80,9 @@ Where everything lands:
 | `audit/lenses.md` | The checked lens findings |
 | `audit/findings.md` | Every finding under its stable ID, with when it was first and last seen and its status |
 | `audit/findings-log.md` | The running log for this repo |
+| `SENTINEL.md` | The record of the last audit: what ran, how it went, and the open findings as counts by severity. The one file to commit |
 
-`audit/` and `CLAUDE-SECURITY-*/` stay out of git. The audit fixes nothing, writes no tests and commits nothing. What you do with the findings is up to you.
+`audit/` and `CLAUDE-SECURITY-*/` stay out of git; `SENTINEL.md` goes in. The audit fixes nothing, writes no tests and commits nothing, the stamp included. What you do with the findings is up to you.
 
 On a public repo, keep findings to yourself until they're fixed: no issue, no commit message and no post that describes an open one.
 
@@ -90,7 +91,8 @@ On a public repo, keep findings to yourself until they're fixed: no issue, no co
 | When | What to do |
 |------|------------|
 | Every pull request, and every push to `main` | `fast.yml` runs by itself: the mechanical checks, and on a pull request Claude Opus 5.5 reviewing the diff alongside them and posting the result as a comment. On a public repo with the age variable set, the comment holds only the count of findings; read the review with `.sentinel/ci/read-review.sh <pull request number>`. The check fails if the review didn't actually run. The review runs only on pull requests; a push straight to `main` gets the mechanical checks alone. |
-| Before a release | `/snt:audit`, then decide what to do with what it finds. |
+| Before a release | `/snt:audit`, commit `SENTINEL.md`, then decide what to do with what it finds. |
+| Once, in the release workflow | Add the step `run: .sentinel/stamp-age.sh .` after a checkout with `submodules: recursive` and `fetch-depth: 0`. A release from a commit the last audit did not cover fails, and so does one with no `SENTINEL.md`. |
 | When the tool gains a new input, output, command or hook | Update `THREAT-MODEL.md` and `.claude/claude-security-guidance.md` first, then audit. The pull request review and your check of the Claude Security report both work from the threat model. |
 | When sentinel changes | Move the project's pin and commit it: `git submodule update --remote .sentinel` |
 | When the snt plugin changes | `claude plugin marketplace update sentinel && claude plugin update snt@sentinel`, then restart Claude Code |

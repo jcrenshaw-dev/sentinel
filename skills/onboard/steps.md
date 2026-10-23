@@ -68,9 +68,8 @@ With it set, the review is encrypted and the comment shows only the count of fin
 Add a `SECURITY.md` with:
 
 - How to report a vulnerability. Ask the user for the contact or channel; never make one up.
-- What runs on every pull request and every push to main: the workflows from step 6, what each one checks, and whether it fails the pull request.
-- What the full audit runs, step by step, following `.sentinel/skills/audit/steps.md`. Say that it only finds and records: it fixes nothing and writes no tests.
-- A link to https://github.com/jcrenshaw-dev/sentinel.
+- That the repository is audited with sentinel, with a link to https://github.com/jcrenshaw-dev/sentinel, and that the record of the last audit is `SENTINEL.md` at the repo root once an audit has run: what ran, how it went, and the open findings as counts. Say that the audit only finds and records: it fixes nothing and writes no tests.
+- What runs on every pull request and every push to main, in a sentence or two: the workflow from step 6 and whether it fails the pull request. For the full list of checks, point at the kit's README in the `.sentinel` submodule, which is pinned to the version this repo runs, instead of restating it, so the file does not go stale when the kit changes.
 
 ## Finish
 
